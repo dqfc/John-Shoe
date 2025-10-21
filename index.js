@@ -34,6 +34,9 @@ function rotateStatus() {
 // Boggle game state
 let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
 
+// CAH game state
+let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {};
+
 function loadState() {
   try {
     games = JSON.parse(fs.readFileSync('games.json', 'utf8')) || {};
@@ -41,10 +44,15 @@ function loadState() {
     endTimes = JSON.parse(fs.readFileSync('endTimes.json', 'utf8')) || {};
     boards = JSON.parse(fs.readFileSync('boards.json', 'utf8')) || {};
     activeGames = JSON.parse(fs.readFileSync('activeGames.json', 'utf8')) || {};
+    cahGames = JSON.parse(fs.readFileSync('cahGames.json', 'utf8')) || {};
+    cahHands = JSON.parse(fs.readFileSync('cahHands.json', 'utf8')) || {};
+    cahDecks = JSON.parse(fs.readFileSync('cahDecks.json', 'utf8')) || {};
+    cahCurrent = JSON.parse(fs.readFileSync('cahCurrent.json', 'utf8')) || {};
+    cahActivePlayers = JSON.parse(fs.readFileSync('cahActivePlayers.json', 'utf8')) || {};
   } catch (e) {
     console.error('Failed to load state files:', e.message);
-    [games, words, endTimes, boards, activeGames].forEach((_, i) => {
-      fs.writeFileSync(['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json'][i], '{}');
+    [games, words, endTimes, boards, activeGames, cahGames, cahHands, cahDecks, cahCurrent, cahActivePlayers].forEach((_, i) => {
+      fs.writeFileSync(['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json'][i], '{}');
     });
   }
 }
@@ -55,6 +63,11 @@ function saveState() {
   fs.writeFileSync('endTimes.json', JSON.stringify(endTimes));
   fs.writeFileSync('boards.json', JSON.stringify(boards));
   fs.writeFileSync('activeGames.json', JSON.stringify(activeGames));
+  fs.writeFileSync('cahGames.json', JSON.stringify(cahGames));
+  fs.writeFileSync('cahHands.json', JSON.stringify(cahHands));
+  fs.writeFileSync('cahDecks.json', JSON.stringify(cahDecks));
+  fs.writeFileSync('cahCurrent.json', JSON.stringify(cahCurrent));
+  fs.writeFileSync('cahActivePlayers.json', JSON.stringify(cahActivePlayers));
 }
 
 loadState();
@@ -177,6 +190,116 @@ async function endGame(gameId, client, channel) {
   delete words[gameId];
   delete endTimes[gameId];
   delete boards[gameId];
+  saveState();
+}
+
+// CAH helper functions
+async function fetchCards() {
+  const query = `
+    query {
+      packs {
+        black {
+          text
+          pick
+        }
+        white {
+          text
+        }
+      }
+    }
+  `;
+  try {
+    const res = await fetch('https://restagainsthumanity.com/api/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+    const { data } = await res.json();
+    let blacks = [], whites = [];
+    data.packs.forEach(p => {
+      blacks.push(...p.black);
+      whites.push(...p.white);
+    });
+    // Shuffle decks
+    blacks.sort(() => Math.random() - 0.5);
+    whites.sort(() => Math.random() - 0.5);
+    return { blacks, whites };
+  } catch (error) {
+    console.error('Error fetching CAH cards:', error);
+    return { blacks: [], whites: [] };
+  }
+}
+
+async function sendHand(userId, hand) {
+  const user = await client.users.fetch(userId);
+  const handText = 'Your hand:\n' + hand.map((c, i) => `${i + 1}. ${c.text}`).join('\n');
+  user.send(handText);
+}
+
+async function startRound(gameId) {
+  const game = cahGames[gameId];
+  const channel = await client.channels.fetch(game.channel);
+  const czarId = game.players[game.czarIndex];
+  if (cahDecks[gameId].blacks.length === 0) {
+    return endCahGame(gameId, 'No more black cards!');
+  }
+  const black = cahDecks[gameId].blacks.shift();
+  cahCurrent[gameId] = {
+    black,
+    submissions: {},
+    mapping: {},
+    pickMap: {},
+    showed: false,
+    anonCount: 0
+  };
+  saveState();
+  channel.send(`**Round Start!**\nBlack card: ${black.text} (Pick: ${black.pick})\nCard Czar: <@${czarId}>`);
+  for (const playerId of game.players) {
+    if (playerId === czarId) continue;
+    const user = await client.users.fetch(playerId);
+    user.send(`Submit ${black.pick} card number(s) separated by space (e.g., 1 3).`);
+  }
+}
+
+async function showSubmissions(gameId) {
+  const current = cahCurrent[gameId];
+  if (current.showed) return;
+  const game = cahGames[gameId];
+  const channel = await client.channels.fetch(game.channel);
+  const czarId = game.players[game.czarIndex];
+  let anons = Object.keys(current.submissions);
+  anons.sort(() => Math.random() - 0.5); // Shuffle for anonymity
+  let list = '**Submissions:**\n';
+  const pickMap = {};
+  anons.forEach((anon, i) => {
+    const cards = current.submissions[anon];
+    let filled = current.black.text;
+    cards.forEach(c => {
+      filled = filled.replace('_', c);
+    });
+    const num = i + 1;
+    list += `${num}. ${filled}\n`;
+    pickMap[num] = anon;
+  });
+  current.pickMap = pickMap;
+  current.showed = true;
+  saveState();
+  channel.send(`${list}\nCzar <@${czarId}>, choose winner with +pick <number>`);
+}
+
+async function endCahGame(gameId, reason) {
+  const game = cahGames[gameId];
+  const channel = await client.channels.fetch(game.channel);
+  let scoresText = '**Final Scores:**\n';
+  game.players.forEach((p, i) => {
+    scoresText += `<@${p}>: ${game.scores[i]} points\n`;
+  });
+  channel.send(`Game over! ${reason}\n${scoresText}`);
+  game.players.forEach(p => delete cahActivePlayers[p]);
+  delete cahGames[gameId];
+  delete cahHands[gameId];
+  delete cahDecks[gameId];
+  delete cahCurrent[gameId];
   saveState();
 }
 
@@ -353,6 +476,9 @@ const commands = {
 - \`+quote\` - quote a message (reply to someone)
 - \`+boggle\` - play boggle
 - \`+join\` - join boggle game
+- \`+cah\` - start Cards Against Humanity game (requires 4 players)
+- \`+joincah\` - join CAH game
+- \`+pick <num>\` - (CAH Czar only) pick winning submission
     `;
     await message.channel.send(helpText);
   },
@@ -531,6 +657,97 @@ const commands = {
     sendToPlayer(games[message.channel.id].player1);
     sendToPlayer(games[message.channel.id].player2);
     setTimeout(() => endGame(message.channel.id, client, message.channel), 120000);
+  },
+
+  cah: async (message) => {
+    const gameId = message.channel.id;
+    if (cahGames[gameId]) {
+      return message.channel.send('A CAH game is already in progress in this channel!');
+    }
+    cahGames[gameId] = {
+      players: [message.author.id],
+      czarIndex: 0,
+      scores: [],
+      channel: gameId
+    };
+    cahActivePlayers[message.author.id] = gameId;
+    saveState();
+    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
+  },
+
+  joincah: async (message) => {
+    const gameId = message.channel.id;
+    if (!cahGames[gameId]) {
+      return message.channel.send('No CAH game is currently active in this channel!');
+    }
+    const game = cahGames[gameId];
+    if (game.players.length >= 4) {
+      return message.channel.send('The game is already full!');
+    }
+    if (game.players.includes(message.author.id)) {
+      return message.channel.send('You are already in the game!');
+    }
+    game.players.push(message.author.id);
+    cahActivePlayers[message.author.id] = gameId;
+    saveState();
+    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
+    if (game.players.length === 4) {
+      game.scores = new Array(4).fill(0);
+      cahDecks[gameId] = await fetchCards();
+      cahHands[gameId] = {};
+      for (let i = 0; i < 4; i++) {
+        const playerId = game.players[i];
+        const hand = cahDecks[gameId].whites.splice(0, 10);
+        cahHands[gameId][playerId] = hand;
+        await sendHand(playerId, hand);
+      }
+      saveState();
+      await message.channel.send('All players joined! Starting game.');
+      await startRound(gameId);
+    }
+  },
+
+  pick: async (message, args) => {
+    const gameId = message.channel.id;
+    if (!cahGames[gameId] || !cahCurrent[gameId]) {
+      return;
+    }
+    const game = cahGames[gameId];
+    const current = cahCurrent[gameId];
+    const czarId = game.players[game.czarIndex];
+    if (message.author.id !== czarId) {
+      return message.reply('Only the Card Czar can pick the winner!');
+    }
+    if (!current.showed) {
+      return message.reply('Submissions are not ready yet!');
+    }
+    const num = parseInt(args[0]);
+    if (isNaN(num) || !current.pickMap[num]) {
+      return message.reply('Invalid pick number!');
+    }
+    const anon = current.pickMap[num];
+    const winnerId = current.mapping[anon];
+    const winnerIndex = game.players.indexOf(winnerId);
+    game.scores[winnerIndex]++;
+    saveState();
+    const filled = current.black.text.replace(/_/g, (match, offset) => current.submissions[anon].shift() || match);
+    await message.channel.send(`Winner is <@${winnerId}> with: ${filled}\nThey get 1 awesome point! Current score: ${game.scores[winnerIndex]}`);
+    if (game.scores[winnerIndex] >= 5) {
+      return endCahGame(gameId, `<@${winnerId}> reached 5 points!`);
+    }
+    // Refill hands
+    for (const playerId of game.players) {
+      const hand = cahHands[gameId][playerId];
+      const needed = 10 - hand.length;
+      if (needed > 0) {
+        hand.push(...cahDecks[gameId].whites.splice(0, needed));
+      }
+      await sendHand(playerId, hand);
+    }
+    // Rotate Czar
+    game.czarIndex = (game.czarIndex + 1) % 4;
+    saveState();
+    await startRound(gameId);
   }
 };
 
@@ -538,20 +755,21 @@ const commands = {
 client.on('messageCreate', async (message) => {
   if (message.author.id === client.user.id) return; // Ignore selfbot messages
 
-  // Handle DMs for Boggle words
+  // Handle DMs for games
   if (message.channel.type === 'DM') {
-    const gameId = activeGames[message.author.id];
-    if (gameId && games[gameId] && Date.now() < endTimes[gameId] && 
-        (message.author.id === games[gameId].player1 || message.author.id === games[gameId].player2)) {
-      const player = message.author.id === games[gameId].player1 ? 'p1' : 'p2';
+    // Boggle handling
+    const boggleGameId = activeGames[message.author.id];
+    if (boggleGameId && games[boggleGameId] && Date.now() < endTimes[boggleGameId] && 
+        (message.author.id === games[boggleGameId].player1 || message.author.id === games[boggleGameId].player2)) {
+      const player = message.author.id === games[boggleGameId].player1 ? 'p1' : 'p2';
       const word = message.content.trim().toLowerCase();
-      const board = boards[gameId];
-      if (isValidWord(board, word) && !words[gameId][player].includes(word)) {
+      const board = boards[boggleGameId];
+      if (isValidWord(board, word) && !words[boggleGameId][player].includes(word)) {
         const isValid = await isValidEnglishWord(word);
         if (isValid) {
-          words[gameId][player].push(word);
+          words[boggleGameId][player].push(word);
           await message.reply(`Valid word added: ${word}`);
-          console.log(`Player ${message.author.tag} submitted valid word: ${word} in game ${gameId}`);
+          console.log(`Player ${message.author.tag} submitted valid word: ${word} in game ${boggleGameId}`);
         } else {
           await message.reply(`Invalid word: ${word} is not a recognized English word`);
         }
@@ -559,6 +777,40 @@ client.on('messageCreate', async (message) => {
         await message.reply(`Invalid word: ${word} (either not formable, too short, or duplicate)`);
       }
       saveState();
+      return;
+    }
+
+    // CAH handling
+    const cahGameId = cahActivePlayers[message.author.id];
+    if (cahGameId && cahCurrent[cahGameId]) {
+      const game = cahGames[cahGameId];
+      const current = cahCurrent[cahGameId];
+      const czarId = game.players[game.czarIndex];
+      if (message.author.id === czarId) {
+        return message.reply('Card Czar does not submit cards!');
+      }
+      if (Object.values(current.mapping).includes(message.author.id)) {
+        return message.reply('You have already submitted!');
+      }
+      const nums = message.content.trim().split(' ').map(n => parseInt(n) - 1);
+      if (nums.length !== current.black.pick || nums.some(isNaN) || new Set(nums).size !== nums.length) {
+        return message.reply(`Invalid submission! Need exactly ${current.black.pick} unique card numbers.`);
+      }
+      const hand = cahHands[cahGameId][message.author.id];
+      if (nums.some(i => i < 0 || i >= hand.length)) {
+        return message.reply('Invalid card numbers!');
+      }
+      const cards = nums.map(i => hand[i].text);
+      nums.sort((a, b) => b - a); // Remove from end to avoid index shift
+      nums.forEach(i => hand.splice(i, 1));
+      const anon = `anon${++current.anonCount}`;
+      current.submissions[anon] = cards;
+      current.mapping[anon] = message.author.id;
+      saveState();
+      await message.reply('Submission received!');
+      if (Object.keys(current.submissions).length === game.players.length - 1) {
+        await showSubmissions(cahGameId);
+      }
       return;
     }
   }
