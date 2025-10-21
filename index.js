@@ -261,6 +261,7 @@ async function startRound(gameId) {
   }
 }
 
+// CAH helper functions (other functions remain unchanged)
 async function showSubmissions(gameId) {
   const current = cahCurrent[gameId];
   if (current.showed) return;
@@ -273,12 +274,20 @@ async function showSubmissions(gameId) {
   const pickMap = {};
   anons.forEach((anon, i) => {
     const cards = current.submissions[anon];
-    let filled = current.black.text;
-    cards.forEach(c => {
-      filled = filled.replace('_', c);
-    });
+    let displayText;
+    if (current.black.pick === 0 || !current.black.text.includes('_')) {
+      // Handle cards without blanks
+      displayText = `${current.black.text} **+** ${cards.join(', ')}`;
+    } else {
+      // Handle cards with blanks
+      let filled = current.black.text;
+      cards.forEach(c => {
+        filled = filled.replace('_', c);
+      });
+      displayText = filled;
+    }
     const num = i + 1;
-    list += `${num}. ${filled}\n`;
+    list += `${num}. ${displayText}\n`;
     pickMap[num] = anon;
   });
   current.pickMap = pickMap;
