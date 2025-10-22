@@ -6,6 +6,15 @@ const client = new Client({
   checkUpdate: false
 });
 
+/* ============================================================= */
+/*  BIG IMPORTANT TOGGLE                                         */
+/*  Set to true -> ONLY custom white cards (no API cards)        */
+/*  Set to false -> API cards + custom cards (default behavior)  */
+/*  Ensure customWhiteCards.json has enough cards (40+) if true  */
+/* ============================================================= */
+const FORCE_CUSTOM_CARDS_ONLY = true;
+/* ============================================================= */
+
 // Your user token (example)
 const TOKEN = 'MTI2MzMxNzc3MDc2Mjg1MDQxNg.GVDTp3.G3hIl3zYeMwLCXl9Quvoy41X0LPztIEf317bjw';
 
@@ -19,6 +28,7 @@ const statuses = [
   { name: 'ivy route', type: 'WATCHING' },
   { name: '+help', type: 'WATCHING' },
   { name: 'how o computtr,. Faggot level 555', type: 'PLAYING' },
+  { name: '+cah is new', type: 'PLAYING' },
   { name: 'tort baller: the movie', type: 'WATCHING' }
 ];
 
@@ -49,12 +59,18 @@ function loadState() {
     cahDecks = JSON.parse(fs.readFileSync('cahDecks.json', 'utf8')) || {};
     cahCurrent = JSON.parse(fs.readFileSync('cahCurrent.json', 'utf8')) || {};
     cahActivePlayers = JSON.parse(fs.readFileSync('cahActivePlayers.json', 'utf8')) || {};
-    customWhiteCards = JSON.parse(fs.readFileSync('customWhiteCards.json', 'utf8')) || [];
+    const rawCustomCards = JSON.parse(fs.readFileSync('customWhiteCards.json', 'utf8'));
+    customWhiteCards = Array.isArray(rawCustomCards) ? rawCustomCards : [];
+    if (!Array.isArray(rawCustomCards)) {
+      console.warn('Warning: customWhiteCards.json is not an array. Resetting to empty array.');
+      fs.writeFileSync('customWhiteCards.json', JSON.stringify([]));
+    }
   } catch (e) {
     console.error('Failed to load state files:', e.message);
     ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json'].forEach(file => {
       fs.writeFileSync(file, file === 'customWhiteCards.json' ? '[]' : '{}');
     });
+    customWhiteCards = [];
   }
 }
 
@@ -277,7 +293,7 @@ async function showSubmissions(gameId) {
     const cards = current.submissions[anon];
     let displayText;
     if (current.black.pick === 0 || !current.black.text.includes('_')) {
-      displayText = `${current.black.text} ${cards.join(', ')}`;
+      displayText = `${current.black.text} + ${cards.join(', ')}`;
     } else {
       let filled = current.black.text;
       cards.forEach(c => {
@@ -286,7 +302,7 @@ async function showSubmissions(gameId) {
       displayText = filled;
     }
     const num = i + 1;
-    list += `${num}\) \`${displayText}\`\n`;
+    list += `${num}. \`${displayText}\`\n`;
     pickMap[num] = anon;
   });
   current.pickMap = pickMap;
@@ -487,7 +503,7 @@ const commands = {
 - \`+cah\` - start Cards Against Humanity game (requires 4 players)
 - \`+joincah\` - join CAH game
 - \`+pick <num>\` - (CAH Czar only) pick winning submission
-*Note*: Permanent custom white cards for CAH can be added using node addWhite.js "card text".
+*Note*: Permanent custom white cards for CAH can be added using node addWhite.js "card text". Set FORCE_CUSTOM_CARDS_ONLY in main.js to true to use only custom cards.
     `;
     await message.channel.send(helpText);
   },
@@ -703,10 +719,25 @@ const commands = {
     await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
     if (game.players.length === 4) {
       game.scores = new Array(4).fill(0);
-      const fetchedCards = await fetchCards();
-      cahDecks[gameId].blacks = fetchedCards.blacks;
-      cahDecks[gameId].whites = [...customWhiteCards, ...fetchedCards.whites];
-      cahDecks[gameId].whites.sort(() => Math.random() - 0.5);
+      let whiteDeck = [...customWhiteCards];
+      if (FORCE_CUSTOM_CARDS_ONLY) {
+        if (whiteDeck.length < 40) {
+          await message.channel.send('Error: Not enough custom white cards (need at least 40 for 4 players). Add more using node addWhite.js or set FORCE_CUSTOM_CARDS_ONLY to false.');
+          game.players.forEach(p => delete cahActivePlayers[p]);
+          delete cahGames[gameId];
+          delete cahDecks[gameId];
+          saveState();
+          return;
+        }
+        const fetched = await fetchCards();
+        cahDecks[gameId].blacks = fetched.blacks;
+      } else {
+        const fetchedCards = await fetchCards();
+        cahDecks[gameId].blacks = fetchedCards.blacks;
+        whiteDeck = [...whiteDeck, ...fetchedCards.whites];
+      }
+      whiteDeck.sort(() => Math.random() - 0.5);
+      cahDecks[gameId].whites = whiteDeck;
       cahHands[gameId] = {};
       for (let i = 0; i < 4; i++) {
         const playerId = game.players[i];
