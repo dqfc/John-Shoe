@@ -253,7 +253,7 @@ async function startRound(gameId) {
     anonCount: 0
   };
   saveState();
-  channel.send(`# Round Start!\nBlack card: ${black.text} (Pick: ${black.pick})\nCard Czar: <@${czarId}>`);
+  channel.send(`# Round Start!\nBlack card: \`${black.text}\` (Pick: ${black.pick})\nCard Czar: <@${czarId}>`);
   for (const playerId of game.players) {
     if (playerId === czarId) continue;
     const user = await client.users.fetch(playerId);
