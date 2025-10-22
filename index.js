@@ -7,19 +7,9 @@ const client = new Client({
   checkUpdate: false
 });
 
-/* ============================================================= */
-/*  BIG IMPORTANT TOGGLE                                         */
-/*  Set to true -> ONLY custom white cards (no API cards)        */
-/*  Set to false -> API cards + custom cards (default behavior)  */
-/*  Ensure customWhiteCards.json has enough cards (40+) if true  */
-/* ============================================================= */
 const FORCE_CUSTOM_CARDS_ONLY = true;
-/* ============================================================= */
-
-// Your user token (example)
 const TOKEN = process.env.TOKEN;
 
-// Status rotation
 const statuses = [
   { name: 'tort baller', type: 'PLAYING' },
   { name: 'Something New', type: 'LISTENING' },
@@ -42,14 +32,9 @@ function rotateStatus() {
   console.log(`Updated status to: ${status.type} ${status.name}`);
 }
 
-// Boggle game state
 let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
-
-// CAH game state
 let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {}, customWhiteCards = [];
-
-// Battleship game state
-let battleshipBoards = {}, currentTurns = {}, placedShips = {}, placementPhases = {};
+let battleshipBoards = {}, currentTurns = {}, placedShips = {}, placementPhases = {}, boardMessages = {};
 const shipSizes = { carrier: 5, battleship: 4, cruiser: 3, submarine: 3, destroyer: 2 };
 
 function loadState() {
@@ -74,9 +59,10 @@ function loadState() {
     currentTurns = JSON.parse(fs.readFileSync('currentTurns.json', 'utf8')) || {};
     placedShips = JSON.parse(fs.readFileSync('placedShips.json', 'utf8')) || {};
     placementPhases = JSON.parse(fs.readFileSync('placementPhases.json', 'utf8')) || {};
+    boardMessages = JSON.parse(fs.readFileSync('boardMessages.json', 'utf8')) || {};
   } catch (e) {
     console.error('Failed to load state files:', e.message);
-    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json', 'battleshipBoards.json', 'currentTurns.json', 'placedShips.json', 'placementPhases.json'].forEach(file => {
+    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json', 'battleshipBoards.json', 'currentTurns.json', 'placedShips.json', 'placementPhases.json', 'boardMessages.json'].forEach(file => {
       fs.writeFileSync(file, file === 'customWhiteCards.json' ? '[]' : '{}');
     });
     customWhiteCards = [];
@@ -99,6 +85,7 @@ function saveState() {
   fs.writeFileSync('currentTurns.json', JSON.stringify(currentTurns));
   fs.writeFileSync('placedShips.json', JSON.stringify(placedShips));
   fs.writeFileSync('placementPhases.json', JSON.stringify(placementPhases));
+  fs.writeFileSync('boardMessages.json', JSON.stringify(boardMessages));
 }
 
 loadState();
@@ -129,7 +116,6 @@ async function isValidEnglishWord(word) {
   }
 }
 
-// Boggle game logic
 function isValidWord(board, word) {
   word = word.toLowerCase().trim();
   if (word.length < 3) return false;
@@ -191,45 +177,91 @@ async function createBoardImage(board) {
   return canvas.toBuffer();
 }
 
-async function createBattleshipImage(grid, isOwn) {
+async function createBattleshipImage(ownGrid, trackingGrid) {
   const cellSize = 40;
-  const canvas = Canvas.createCanvas(10 * cellSize + 50, 10 * cellSize + 50);
+  const canvas = Canvas.createCanvas(900, 450);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#000000';
   ctx.font = '20px sans-serif';
   ctx.textAlign = 'center';
+
+  // Labels for Own Board
+  ctx.fillText('Your Board', 250, 20);
   for (let i = 0; i < 10; i++) {
-    ctx.fillText(String.fromCharCode(65 + i), 50 + i * cellSize + cellSize / 2, 30);
-    ctx.fillText((i + 1).toString(), 25, 50 + i * cellSize + cellSize / 2);
+    ctx.fillText(String.fromCharCode(65 + i), 50 + i * cellSize + cellSize / 2, 70);
+    ctx.fillText((i + 1).toString(), 25, 90 + i * cellSize + cellSize / 2);
   }
+  // Labels for Tracking Board
+  ctx.fillText('Target Board', 650, 20);
+  for (let i = 0; i < 10; i++) {
+    ctx.fillText(String.fromCharCode(65 + i), 450 + i * cellSize + cellSize / 2, 70);
+    ctx.fillText((i + 1).toString(), 425, 90 + i * cellSize + cellSize / 2);
+  }
+
+  // Draw grids
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 10; i++) {
+    // Own grid vertical
     ctx.beginPath();
-    ctx.moveTo(50 + i * cellSize, 50);
-    ctx.lineTo(50 + i * cellSize, 50 + 10 * cellSize);
+    ctx.moveTo(50 + i * cellSize, 90);
+    ctx.lineTo(50 + i * cellSize, 90 + 10 * cellSize);
     ctx.stroke();
+    // Own grid horizontal
     ctx.beginPath();
-    ctx.moveTo(50, 50 + i * cellSize);
-    ctx.lineTo(50 + 10 * cellSize, 50 + i * cellSize);
+    ctx.moveTo(50, 90 + i * cellSize);
+    ctx.lineTo(50 + 10 * cellSize, 90 + i * cellSize);
+    ctx.stroke();
+    // Tracking grid vertical
+    ctx.beginPath();
+    ctx.moveTo(450 + i * cellSize, 90);
+    ctx.lineTo(450 + i * cellSize, 90 + 10 * cellSize);
+    ctx.stroke();
+    // Tracking grid horizontal
+    ctx.beginPath();
+    ctx.moveTo(450, 90 + i * cellSize);
+    ctx.lineTo(450 + 10 * cellSize, 90 + i * cellSize);
     ctx.stroke();
   }
+
+  // Draw own grid
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 10; c++) {
       const x = 50 + c * cellSize;
-      const y = 50 + r * cellSize;
-      const cell = grid[r][c];
-      if (cell === ' ') {
-        ctx.fillStyle = '#add8e6';
-      } else if (cell === 'S') {
-        ctx.fillStyle = isOwn ? '#808080' : '#add8e6';
-      } else if (cell === 'H') {
-        ctx.fillStyle = '#ff0000';
-      } else if (cell === 'M') {
-        ctx.fillStyle = '#ffffff';
+      const y = 90 + r * cellSize;
+      const cell = ownGrid[r][c];
+      ctx.fillStyle = cell === ' ' ? '#add8e6' : cell === 'S' ? '#808080' : cell === 'H' ? '#ff0000' : '#ffffff';
+      ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+      if (cell === 'M') {
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(x + cellSize / 2, y + cellSize / 2, cellSize / 4, 0, 2 * Math.PI);
+        ctx.fill();
       }
+      if (cell === 'H') {
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + 5, y + 5);
+        ctx.lineTo(x + cellSize - 5, y + cellSize - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + cellSize - 5, y + 5);
+        ctx.lineTo(x + 5, y + cellSize - 5);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw tracking grid
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 10; c++) {
+      const x = 450 + c * cellSize;
+      const y = 90 + r * cellSize;
+      const cell = trackingGrid[r][c];
+      ctx.fillStyle = cell === ' ' ? '#add8e6' : cell === 'H' ? '#ff0000' : '#ffffff';
       ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
       if (cell === 'M') {
         ctx.fillStyle = '#000000';
@@ -254,17 +286,32 @@ async function createBattleshipImage(grid, isOwn) {
   return canvas.toBuffer();
 }
 
-async function sendBoards(gameId, playerKey) {
+async function updateBoards(gameId, playerKey) {
   const playerId = games[gameId][playerKey === 'p1' ? 'player1' : 'player2'];
   const user = await client.users.fetch(playerId);
   const ownKey = `${playerKey}Own`;
   const trackingKey = `${playerKey}Tracking`;
   const ownGrid = battleshipBoards[gameId][ownKey];
   const trackingGrid = battleshipBoards[gameId][trackingKey];
-  const ownImg = await createBattleshipImage(ownGrid, true);
-  const trackingImg = await createBattleshipImage(trackingGrid, false);
-  user.send({ content: 'Your board:', files: [{ attachment: ownImg, name: 'own.png' }] });
-  user.send({ content: 'Target board:', files: [{ attachment: trackingImg, name: 'target.png' }] });
+  const img = await createBattleshipImage(ownGrid, trackingGrid);
+  const content = playerKey === currentTurns[gameId] ? 'Your turn!' : 'Waiting for opponent...';
+  if (!boardMessages[gameId] || !boardMessages[gameId][playerKey]) {
+    const message = await user.send({ content, files: [{ attachment: img, name: 'boards.png' }] });
+    boardMessages[gameId] = boardMessages[gameId] || {};
+    boardMessages[gameId][playerKey] = message.id;
+    saveState();
+  } else {
+    const messageId = boardMessages[gameId][playerKey];
+    try {
+      const message = await user.dmChannel.messages.fetch(messageId);
+      await message.edit({ content, files: [{ attachment: img, name: 'boards.png' }] });
+    } catch (error) {
+      console.error(`Failed to edit message for ${playerKey}:`, error);
+      const message = await user.send({ content, files: [{ attachment: img, name: 'boards.png' }] });
+      boardMessages[gameId][playerKey] = message.id;
+      saveState();
+    }
+  }
 }
 
 async function endGame(gameId, client, channel) {
@@ -301,7 +348,6 @@ async function endGame(gameId, client, channel) {
   saveState();
 }
 
-// CAH helper functions
 async function fetchCards() {
   const query = `
     query {
@@ -416,7 +462,6 @@ async function endCahGame(gameId, reason) {
   saveState();
 }
 
-// Command handlers
 const commands = {
   hello: async (message, args) => {
     await message.channel.send('hi');
@@ -797,12 +842,16 @@ const commands = {
       const sendInstructions = async (userId, playerKey) => {
         const user = await client.users.fetch(userId);
         user.send('Place your ships: carrier (5), battleship (4), cruiser (3), submarine (3), destroyer (2)');
-        user.send('Command: place <ship> <coord> <dir> e.g. place carrier A1 h');
+        user.send('Command: <ship> <coord> <dir> e.g. carrier A1 h');
         user.send('Coords A1-J10, dir h horizontal, v vertical');
         const ownKey = `${playerKey}Own`;
         const ownGrid = battleshipBoards[gameId][ownKey];
-        const img = await createBattleshipImage(ownGrid, true);
-        user.send({ content: 'Your current board:', files: [{ attachment: img, name: 'own.png' }] });
+        const trackingGrid = battleshipBoards[gameId][`${playerKey}Tracking`];
+        const img = await createBattleshipImage(ownGrid, trackingGrid);
+        const message = await user.send({ content: 'Your current boards:', files: [{ attachment: img, name: 'boards.png' }] });
+        boardMessages[gameId] = boardMessages[gameId] || {};
+        boardMessages[gameId][playerKey] = message.id;
+        saveState();
       };
       await sendInstructions(games[gameId].player1, 'p1');
       await sendInstructions(games[gameId].player2, 'p2');
@@ -918,7 +967,6 @@ const commands = {
   }
 };
 
-// Unified message handler
 client.on('messageCreate', async (message) => {
   if (message.author.id === client.user.id) return;
 
@@ -983,13 +1031,9 @@ client.on('messageCreate', async (message) => {
         const playerKey = message.author.id === games[gameId].player1 ? 'p1' : 'p2';
         const oppKey = playerKey === 'p1' ? 'p2' : 'p1';
         if (!placementPhases[gameId][playerKey]) {
-          const content = message.content.trim().toLowerCase();
-          if (!content.startsWith('place ')) {
-            return message.reply('Invalid command. Use: place <ship> <coord> <dir> e.g. place carrier a1 h');
-          }
-          const parts = content.slice(6).split(' ');
+          const parts = message.content.trim().toLowerCase().split(' ');
           if (parts.length !== 3) {
-            return message.reply('Invalid format.');
+            return message.reply('Invalid format. Use: <ship> <coord> <dir> e.g. carrier A1 h');
           }
           const ship = parts[0];
           let coord = parts[1].toUpperCase();
@@ -1030,8 +1074,7 @@ client.on('messageCreate', async (message) => {
           placedShips[gameId][playerKey].push(ship);
           saveState();
           await message.reply(`Placed ${ship} at ${coord} ${dir.toUpperCase()}`);
-          const ownImg = await createBattleshipImage(ownGrid, true);
-          await message.channel.send({ files: [{ attachment: ownImg, name: 'own.png' }] });
+          await updateBoards(gameId, playerKey);
           if (placedShips[gameId][playerKey].length === 5) {
             placementPhases[gameId][playerKey] = true;
             saveState();
@@ -1041,8 +1084,8 @@ client.on('messageCreate', async (message) => {
               saveState();
               const channel = await client.channels.fetch(gameId);
               channel.send('Both players have placed their ships! Game starts. Player 1\'s turn.');
-              await sendBoards(gameId, 'p1');
-              await sendBoards(gameId, 'p2');
+              await updateBoards(gameId, 'p1');
+              await updateBoards(gameId, 'p2');
             }
           }
         } else {
@@ -1077,13 +1120,14 @@ client.on('messageCreate', async (message) => {
             delete currentTurns[gameId];
             delete placedShips[gameId];
             delete placementPhases[gameId];
+            delete boardMessages[gameId];
             saveState();
             return;
           }
           currentTurns[gameId] = oppKey;
           saveState();
-          await sendBoards(gameId, 'p1');
-          await sendBoards(gameId, 'p2');
+          await updateBoards(gameId, 'p1');
+          await updateBoards(gameId, 'p2');
           await message.reply(`${isHit ? 'Hit' : 'Miss'} on ${coord}`);
         }
         return;
