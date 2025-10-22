@@ -977,18 +977,30 @@ client.on('messageCreate', async (message) => {
       const current = cahCurrent[cahGameId];
       const czarId = game.players[game.czarIndex];
       if (message.author.id === czarId) {
-        return message.reply('Card Czar does not submit cards!');
+        const errorMsg = await message.reply('Card Czar does not submit cards!');
+        await message.react('❌');
+        setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+        return;
       }
       if (Object.values(current.mapping).includes(message.author.id)) {
-        return message.reply('You have already submitted!');
+        const errorMsg = await message.reply('You have already submitted!');
+        await message.react('❌');
+        setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+        return;
       }
       const nums = message.content.trim().split(' ').map(n => parseInt(n) - 1);
       if (nums.length !== current.black.pick || nums.some(isNaN) || new Set(nums).size !== nums.length) {
-        return message.reply(`Invalid submission! Need exactly ${current.black.pick} unique card numbers.`);
+        const errorMsg = await message.reply(`Invalid submission! Need exactly ${current.black.pick} unique card numbers.`);
+        await message.react('❌');
+        setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+        return;
       }
       const hand = cahHands[cahGameId][message.author.id];
       if (nums.some(i => i < 0 || i >= hand.length)) {
-        return message.reply('Invalid card numbers!');
+        const errorMsg = await message.reply('Invalid card numbers!');
+        await message.react('❌');
+        setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+        return;
       }
       const cards = nums.map(i => hand[i].text);
       nums.sort((a, b) => b - a);
@@ -997,6 +1009,7 @@ client.on('messageCreate', async (message) => {
       current.submissions[anon] = cards;
       current.mapping[anon] = message.author.id;
       saveState();
+      await message.react('✅');
       await message.reply('Submission received!');
       if (Object.keys(current.submissions).length === game.players.length - 1) {
         await showSubmissions(cahGameId);
@@ -1016,13 +1029,18 @@ client.on('messageCreate', async (message) => {
             const isValid = await isValidEnglishWord(word);
             if (isValid) {
               words[gameId][player].push(word);
+              await message.react('✅');
               await message.reply(`Valid word added: ${word}`);
               console.log(`Player ${message.author.tag} submitted valid word: ${word} in game ${gameId}`);
             } else {
-              await message.reply(`Invalid word: ${word} is not a recognized English word`);
+              const errorMsg = await message.reply(`Invalid word: ${word} is not a recognized English word`);
+              await message.react('❌');
+              setTimeout(() => errorMsg.delete().catch(console.error), 5000);
             }
           } else {
-            await message.reply(`Invalid word: ${word} (either not formable, too short, or duplicate)`);
+            const errorMsg = await message.reply(`Invalid word: ${word} (either not formable, too short, or duplicate)`);
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
           }
           saveState();
           return;
@@ -1033,46 +1051,77 @@ client.on('messageCreate', async (message) => {
         if (!placementPhases[gameId][playerKey]) {
           const parts = message.content.trim().toLowerCase().split(' ');
           if (parts.length !== 3) {
-            return message.reply('Invalid format. Use: <ship> <coord> <dir> e.g. carrier A1 h');
+            const errorMsg = await message.reply('Invalid format. Use: <ship> <coord> <dir> e.g. carrier A1 h');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const ship = parts[0];
           let coord = parts[1].toUpperCase();
           const dir = parts[2];
           if (!shipSizes[ship]) {
-            return message.reply('Invalid ship. Valid: carrier, battleship, cruiser, submarine, destroyer');
+            const errorMsg = await message.reply('Invalid ship. Valid: carrier, battleship, cruiser, submarine, destroyer');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           if (placedShips[gameId][playerKey].includes(ship)) {
-            return message.reply('Ship already placed.');
+            const errorMsg = await message.reply('Ship already placed.');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           if (!/^[A-J]([1-9]|10)$/.test(coord)) {
-            return message.reply('Invalid coord e.g. A1 or J10');
+            const errorMsg = await message.reply('Invalid coord e.g. A1 or J10');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const col = coord.charCodeAt(0) - 65;
           const row = parseInt(coord.slice(1)) - 1;
           const size = shipSizes[ship];
           let positions = [];
           if (dir === 'h') {
-            if (col + size > 10) return message.reply('Out of bounds.');
+            if (col + size > 10) {
+              const errorMsg = await message.reply('Out of bounds.');
+              await message.react('❌');
+              setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+              return;
+            }
             for (let i = 0; i < size; i++) {
               positions.push([row, col + i]);
             }
           } else if (dir === 'v') {
-            if (row + size > 10) return message.reply('Out of bounds.');
+            if (row + size > 10) {
+              const errorMsg = await message.reply('Out of bounds.');
+              await message.react('❌');
+              setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+              return;
+            }
             for (let i = 0; i < size; i++) {
               positions.push([row + i, col]);
             }
           } else {
-            return message.reply('Direction must be h or v.');
+            const errorMsg = await message.reply('Direction must be h or v.');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const ownGrid = battleshipBoards[gameId][`${playerKey}Own`];
           for (let [r, c] of positions) {
-            if (ownGrid[r][c] !== ' ') return message.reply('Overlap or occupied.');
+            if (ownGrid[r][c] !== ' ') {
+              const errorMsg = await message.reply('Overlap or occupied.');
+              await message.react('❌');
+              setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+              return;
+            }
           }
           for (let [r, c] of positions) {
             ownGrid[r][c] = 'S';
           }
           placedShips[gameId][playerKey].push(ship);
           saveState();
+          await message.react('✅');
           await message.reply(`Placed ${ship} at ${coord} ${dir.toUpperCase()}`);
           await updateBoards(gameId, playerKey);
           if (placedShips[gameId][playerKey].length === 5) {
@@ -1090,17 +1139,26 @@ client.on('messageCreate', async (message) => {
           }
         } else {
           if (currentTurns[gameId] !== playerKey) {
-            return message.reply('Not your turn!');
+            const errorMsg = await message.reply('Not your turn!');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const coord = message.content.trim().toUpperCase();
           if (!/^[A-J]([1-9]|10)$/.test(coord)) {
-            return message.reply('Invalid coord e.g. A1 or J10');
+            const errorMsg = await message.reply('Invalid coord e.g. A1 or J10');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const col = coord.charCodeAt(0) - 65;
           const row = parseInt(coord.slice(1)) - 1;
           const trackingGrid = battleshipBoards[gameId][`${playerKey}Tracking`];
           if (trackingGrid[row][col] !== ' ') {
-            return message.reply('Already guessed there.');
+            const errorMsg = await message.reply('Already guessed there.');
+            await message.react('❌');
+            setTimeout(() => errorMsg.delete().catch(console.error), 5000);
+            return;
           }
           const oppOwnGrid = battleshipBoards[gameId][`${oppKey}Own`];
           const isHit = oppOwnGrid[row][col] === 'S';
@@ -1108,6 +1166,7 @@ client.on('messageCreate', async (message) => {
           oppOwnGrid[row][col] = mark;
           trackingGrid[row][col] = mark;
           saveState();
+          await message.react('✅');
           const channel = await client.channels.fetch(gameId);
           channel.send(`<@${message.author.id}> guessed ${coord}: ${isHit ? 'Hit!' : 'Miss!'}`);
           const oppHits = oppOwnGrid.flat().filter(cell => cell === 'H').length;
