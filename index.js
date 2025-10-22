@@ -263,10 +263,8 @@ async function sendBoards(gameId, playerKey) {
   const trackingGrid = battleshipBoards[gameId][trackingKey];
   const ownImg = await createBattleshipImage(ownGrid, true);
   const trackingImg = await createBattleshipImage(trackingGrid, false);
-  user.send('Your board:');
-  user.send({ files: [{ attachment: ownImg, name: 'own.png' }] });
-  user.send('Target board:');
-  user.send({ files: [{ attachment: trackingImg, name: 'target.png' }] });
+  user.send({ content: 'Your board:', files: [{ attachment: ownImg, name: 'own.png' }] });
+  user.send({ content: 'Target board:', files: [{ attachment: trackingImg, name: 'target.png' }] });
 }
 
 async function endGame(gameId, client, channel) {
@@ -595,7 +593,6 @@ const commands = {
 - \`+cah\` - start Cards Against Humanity game (requires 4 players)
 - \`+joincah\` - join CAH game
 - \`+pick <num>\` - (CAH Czar only) pick winning submission
-*Note*: Permanent custom white cards for CAH can be added using node addWhite.js "card text". Set FORCE_CUSTOM_CARDS_ONLY in main.js to true to use only custom cards.
     `;
     await message.channel.send(helpText);
   },
