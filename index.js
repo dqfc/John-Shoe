@@ -287,7 +287,7 @@ async function showSubmissions(gameId) {
       displayText = filled;
     }
     const num = i + 1;
-    list += `${num}. \`\`\`${displayText}\`\`\`\n`;
+    list += `${num}. \`${displayText}\`\n`;
     pickMap[num] = anon;
   });
   current.pickMap = pickMap;
