@@ -35,7 +35,7 @@ function rotateStatus() {
 let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
 
 // CAH game state
-let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {};
+let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {}, customWhiteCards = [];
 
 function loadState() {
   try {
@@ -49,10 +49,11 @@ function loadState() {
     cahDecks = JSON.parse(fs.readFileSync('cahDecks.json', 'utf8')) || {};
     cahCurrent = JSON.parse(fs.readFileSync('cahCurrent.json', 'utf8')) || {};
     cahActivePlayers = JSON.parse(fs.readFileSync('cahActivePlayers.json', 'utf8')) || {};
+    customWhiteCards = JSON.parse(fs.readFileSync('customWhiteCards.json', 'utf8')) || [];
   } catch (e) {
     console.error('Failed to load state files:', e.message);
-    [games, words, endTimes, boards, activeGames, cahGames, cahHands, cahDecks, cahCurrent, cahActivePlayers].forEach((_, i) => {
-      fs.writeFileSync(['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json'][i], '{}');
+    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json'].forEach(file => {
+      fs.writeFileSync(file, file === 'customWhiteCards.json' ? '[]' : '{}');
     });
   }
 }
@@ -68,6 +69,7 @@ function saveState() {
   fs.writeFileSync('cahDecks.json', JSON.stringify(cahDecks));
   fs.writeFileSync('cahCurrent.json', JSON.stringify(cahCurrent));
   fs.writeFileSync('cahActivePlayers.json', JSON.stringify(cahActivePlayers));
+  fs.writeFileSync('customWhiteCards.json', JSON.stringify(customWhiteCards));
 }
 
 loadState();
@@ -485,7 +487,7 @@ const commands = {
 - \`+cah\` - start Cards Against Humanity game (requires 4 players)
 - \`+joincah\` - join CAH game
 - \`+pick <num>\` - (CAH Czar only) pick winning submission
-*Note*: Custom white cards for CAH can be added externally using addWhite.js before the game starts.
+*Note*: Permanent custom white cards for CAH can be added using node addWhite.js "card text".
     `;
     await message.channel.send(helpText);
   },
@@ -603,59 +605,6 @@ const commands = {
     console.log(`User ${message.author.tag} used +lesbians with mention ${mention}`);
   },
 
-  cah: async (message) => {
-    const gameId = message.channel.id;
-    if (cahGames[gameId]) {
-      return message.channel.send('A CAH game is already in progress in this channel!');
-    }
-    cahGames[gameId] = {
-      players: [message.author.id],
-      czarIndex: 0,
-      scores: [],
-      channel: gameId
-    };
-    cahActivePlayers[message.author.id] = gameId;
-    cahDecks[gameId] = { blacks: [], whites: [] }; // Initialize for custom cards
-    saveState();
-    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
-  },
-
-  joincah: async (message) => {
-    const gameId = message.channel.id;
-    if (!cahGames[gameId]) {
-      return message.channel.send('No CAH game is currently active in this channel!');
-    }
-    const game = cahGames[gameId];
-    if (game.players.length >= 4) {
-      return message.channel.send('The game is already full!');
-    }
-    if (game.players.includes(message.author.id)) {
-      return message.channel.send('You are already in the game!');
-    }
-    game.players.push(message.author.id);
-    cahActivePlayers[message.author.id] = gameId;
-    saveState();
-    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
-    if (game.players.length === 4) {
-      game.scores = new Array(4).fill(0);
-      const fetchedCards = await fetchCards();
-      cahDecks[gameId].blacks = fetchedCards.blacks;
-      // Merge custom white cards with fetched ones
-      cahDecks[gameId].whites = [...(cahDecks[gameId].whites || []), ...fetchedCards.whites];
-      cahDecks[gameId].whites.sort(() => Math.random() - 0.5); // Shuffle combined deck
-      cahHands[gameId] = {};
-      for (let i = 0; i < 4; i++) {
-        const playerId = game.players[i];
-        const hand = cahDecks[gameId].whites.splice(0, 10);
-        cahHands[gameId][playerId] = hand;
-        await sendHand(playerId, hand);
-      }
-      saveState();
-      await message.channel.send('All players joined! Starting game.');
-      await startRound(gameId);
-    }
-  },
-
   boggle: async (message) => {
     console.log(`User ${message.author.tag} used +boggle in channel ${message.channel.id}`);
     if (games[message.channel.id]) {
@@ -717,6 +666,58 @@ const commands = {
     sendToPlayer(games[message.channel.id].player1);
     sendToPlayer(games[message.channel.id].player2);
     setTimeout(() => endGame(message.channel.id, client, message.channel), 120000);
+  },
+
+  cah: async (message) => {
+    const gameId = message.channel.id;
+    if (cahGames[gameId]) {
+      return message.channel.send('A CAH game is already in progress in this channel!');
+    }
+    cahGames[gameId] = {
+      players: [message.author.id],
+      czarIndex: 0,
+      scores: [],
+      channel: gameId
+    };
+    cahActivePlayers[message.author.id] = gameId;
+    cahDecks[gameId] = { blacks: [], whites: [] };
+    saveState();
+    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
+  },
+
+  joincah: async (message) => {
+    const gameId = message.channel.id;
+    if (!cahGames[gameId]) {
+      return message.channel.send('No CAH game is currently active in this channel!');
+    }
+    const game = cahGames[gameId];
+    if (game.players.length >= 4) {
+      return message.channel.send('The game is already full!');
+    }
+    if (game.players.includes(message.author.id)) {
+      return message.channel.send('You are already in the game!');
+    }
+    game.players.push(message.author.id);
+    cahActivePlayers[message.author.id] = gameId;
+    saveState();
+    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
+    if (game.players.length === 4) {
+      game.scores = new Array(4).fill(0);
+      const fetchedCards = await fetchCards();
+      cahDecks[gameId].blacks = fetchedCards.blacks;
+      cahDecks[gameId].whites = [...customWhiteCards, ...fetchedCards.whites];
+      cahDecks[gameId].whites.sort(() => Math.random() - 0.5);
+      cahHands[gameId] = {};
+      for (let i = 0; i < 4; i++) {
+        const playerId = game.players[i];
+        const hand = cahDecks[gameId].whites.splice(0, 10);
+        cahHands[gameId][playerId] = hand;
+        await sendHand(playerId, hand);
+      }
+      saveState();
+      await message.channel.send('All players joined! Starting game.');
+      await startRound(gameId);
+    }
   },
 
   pick: async (message, args) => {
