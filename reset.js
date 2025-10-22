@@ -12,7 +12,9 @@ async function resetJsonFiles() {
     'cahDecks.json',
     'cahCurrent.json',
     'cahActivePlayers.json',
-    'battleshipBoards.json'
+    'battleshipBoards.json',
+    'placedShips.json',
+    'placementPhases.json'
   ];
 
   try {
