@@ -1,6 +1,7 @@
 const { Client, MessageAttachment } = require('discord.js-selfbot-v13');
 const Canvas = require('canvas');
 const fs = require('fs');
+require('dotenv').config();
 const https = require('https');
 const client = new Client({
   checkUpdate: false
@@ -16,7 +17,7 @@ const FORCE_CUSTOM_CARDS_ONLY = true;
 /* ============================================================= */
 
 // Your user token (example)
-const TOKEN = 'MTI2MzMxNzc3MDc2Mjg1MDQxNg.GVDTp3.G3hIl3zYeMwLCXl9Quvoy41X0LPztIEf317bjw';
+const TOKEN = process.env.TOKEN;
 
 // Status rotation
 const statuses = [
@@ -47,6 +48,10 @@ let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
 // CAH game state
 let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {}, customWhiteCards = [];
 
+// Battleship game state
+let battleshipBoards = {}, currentTurns = {}, placedShips = {}, placementPhases = {};
+const shipSizes = { carrier: 5, battleship: 4, cruiser: 3, submarine: 3, destroyer: 2 };
+
 function loadState() {
   try {
     games = JSON.parse(fs.readFileSync('games.json', 'utf8')) || {};
@@ -65,9 +70,13 @@ function loadState() {
       console.warn('Warning: customWhiteCards.json is not an array. Resetting to empty array.');
       fs.writeFileSync('customWhiteCards.json', JSON.stringify([]));
     }
+    battleshipBoards = JSON.parse(fs.readFileSync('battleshipBoards.json', 'utf8')) || {};
+    currentTurns = JSON.parse(fs.readFileSync('currentTurns.json', 'utf8')) || {};
+    placedShips = JSON.parse(fs.readFileSync('placedShips.json', 'utf8')) || {};
+    placementPhases = JSON.parse(fs.readFileSync('placementPhases.json', 'utf8')) || {};
   } catch (e) {
     console.error('Failed to load state files:', e.message);
-    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json'].forEach(file => {
+    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json', 'battleshipBoards.json', 'currentTurns.json', 'placedShips.json', 'placementPhases.json'].forEach(file => {
       fs.writeFileSync(file, file === 'customWhiteCards.json' ? '[]' : '{}');
     });
     customWhiteCards = [];
@@ -86,6 +95,10 @@ function saveState() {
   fs.writeFileSync('cahCurrent.json', JSON.stringify(cahCurrent));
   fs.writeFileSync('cahActivePlayers.json', JSON.stringify(cahActivePlayers));
   fs.writeFileSync('customWhiteCards.json', JSON.stringify(customWhiteCards));
+  fs.writeFileSync('battleshipBoards.json', JSON.stringify(battleshipBoards));
+  fs.writeFileSync('currentTurns.json', JSON.stringify(currentTurns));
+  fs.writeFileSync('placedShips.json', JSON.stringify(placedShips));
+  fs.writeFileSync('placementPhases.json', JSON.stringify(placementPhases));
 }
 
 loadState();
@@ -104,11 +117,11 @@ async function isValidEnglishWord(word) {
       return false;
     }
     return data.some(entry => {
-      if (!entry.word || typeof entry.tags !== 'object' || !Array.isArray(entry.tags)) {
+      if (!entry.word || typeof entry.defs !== 'object' || !Array.isArray(entry.defs)) {
         console.log(`Invalid entry for "${word}":`, entry);
         return entry.word.toLowerCase() === word.toLowerCase();
       }
-      return entry.word.toLowerCase() === word.toLowerCase() && entry.tags.includes('n');
+      return entry.word.toLowerCase() === word.toLowerCase() && entry.defs.some(def => def.startsWith('n'));
     });
   } catch (error) {
     console.error(`Error validating word "${word}" with Datamuse:`, error.message);
@@ -176,6 +189,84 @@ async function createBoardImage(board) {
     }
   }
   return canvas.toBuffer();
+}
+
+async function createBattleshipImage(grid, isOwn) {
+  const cellSize = 40;
+  const canvas = Canvas.createCanvas(10 * cellSize + 50, 10 * cellSize + 50);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000000';
+  ctx.font = '20px sans-serif';
+  ctx.textAlign = 'center';
+  for (let i = 0; i < 10; i++) {
+    ctx.fillText(String.fromCharCode(65 + i), 50 + i * cellSize + cellSize / 2, 30);
+    ctx.fillText((i + 1).toString(), 25, 50 + i * cellSize + cellSize / 2);
+  }
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    ctx.beginPath();
+    ctx.moveTo(50 + i * cellSize, 50);
+    ctx.lineTo(50 + i * cellSize, 50 + 10 * cellSize);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(50, 50 + i * cellSize);
+    ctx.lineTo(50 + 10 * cellSize, 50 + i * cellSize);
+    ctx.stroke();
+  }
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 10; c++) {
+      const x = 50 + c * cellSize;
+      const y = 50 + r * cellSize;
+      const cell = grid[r][c];
+      if (cell === ' ') {
+        ctx.fillStyle = '#add8e6';
+      } else if (cell === 'S') {
+        ctx.fillStyle = isOwn ? '#808080' : '#add8e6';
+      } else if (cell === 'H') {
+        ctx.fillStyle = '#ff0000';
+      } else if (cell === 'M') {
+        ctx.fillStyle = '#ffffff';
+      }
+      ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+      if (cell === 'M') {
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(x + cellSize / 2, y + cellSize / 2, cellSize / 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      if (cell === 'H') {
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + 5, y + 5);
+        ctx.lineTo(x + cellSize - 5, y + cellSize - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + cellSize - 5, y + 5);
+        ctx.lineTo(x + 5, y + cellSize - 5);
+        ctx.stroke();
+      }
+    }
+  }
+  return canvas.toBuffer();
+}
+
+async function sendBoards(gameId, playerKey) {
+  const playerId = games[gameId][playerKey === 'p1' ? 'player1' : 'player2'];
+  const user = await client.users.fetch(playerId);
+  const ownKey = `${playerKey}Own`;
+  const trackingKey = `${playerKey}Tracking`;
+  const ownGrid = battleshipBoards[gameId][ownKey];
+  const trackingGrid = battleshipBoards[gameId][trackingKey];
+  const ownImg = await createBattleshipImage(ownGrid, true);
+  const trackingImg = await createBattleshipImage(trackingGrid, false);
+  user.send('Your board:');
+  user.send({ files: [{ attachment: ownImg, name: 'own.png' }] });
+  user.send('Target board:');
+  user.send({ files: [{ attachment: trackingImg, name: 'target.png' }] });
 }
 
 async function endGame(gameId, client, channel) {
@@ -499,7 +590,8 @@ const commands = {
 - \`+burn <text>\` - burning text
 - \`+quote\` - quote a message (reply to someone)
 - \`+boggle\` - play boggle
-- \`+join\` - join boggle game
+- \`+battleship\` - play battleship
+- \`+join\` - join boggle or battleship game
 - \`+cah\` - start Cards Against Humanity game (requires 4 players)
 - \`+joincah\` - join CAH game
 - \`+pick <num>\` - (CAH Czar only) pick winning submission
@@ -623,65 +715,101 @@ const commands = {
 
   boggle: async (message) => {
     console.log(`User ${message.author.tag} used +boggle in channel ${message.channel.id}`);
-    if (games[message.channel.id]) {
+    const gameId = message.channel.id;
+    if (games[gameId]) {
       return message.channel.send('A game is already in progress in this channel!');
     }
-    games[message.channel.id] = { player1: message.author.id, player2: null, channel: message.channel.id };
-    activeGames[message.author.id] = message.channel.id;
+    games[gameId] = { player1: message.author.id, player2: null, channel: message.channel.id, gameType: 'boggle' };
+    activeGames[message.author.id] = gameId;
     saveState();
     await message.channel.send('Boggle game started! Use +join to join as the second player.');
   },
 
+  battleship: async (message) => {
+    console.log(`User ${message.author.tag} used +battleship in channel ${message.channel.id}`);
+    const gameId = message.channel.id;
+    if (games[gameId]) {
+      return message.channel.send('A game is already in progress in this channel!');
+    }
+    games[gameId] = { player1: message.author.id, player2: null, channel: message.channel.id, gameType: 'battleship' };
+    activeGames[message.author.id] = gameId;
+    battleshipBoards[gameId] = {
+      p1Own: Array(10).fill().map(() => Array(10).fill(' ')),
+      p1Tracking: Array(10).fill().map(() => Array(10).fill(' ')),
+      p2Own: Array(10).fill().map(() => Array(10).fill(' ')),
+      p2Tracking: Array(10).fill().map(() => Array(10).fill(' '))
+    };
+    placementPhases[gameId] = { p1: false, p2: false };
+    placedShips[gameId] = { p1: [], p2: [] };
+    saveState();
+    await message.channel.send('Battleship game started! Use +join to join as the second player.');
+  },
+
   join: async (message) => {
     console.log(`User ${message.author.tag} used +join in channel ${message.channel.id}`);
-    if (!games[message.channel.id]) {
-      return message.channel.send('No Boggle game is currently active in this channel!');
+    const gameId = message.channel.id;
+    if (!games[gameId]) {
+      return message.channel.send('No game is currently active in this channel!');
     }
-    if (games[message.channel.id].player2) {
+    if (games[gameId].player2) {
       return message.channel.send('The game is already full!');
     }
-    if (message.author.id === games[message.channel.id].player1) {
+    if (message.author.id === games[gameId].player1) {
       return message.channel.send('You cannot join your own game!');
     }
-    games[message.channel.id].player2 = message.author.id;
-    activeGames[message.author.id] = message.channel.id;
-
-    const dice = [
-      "AACIOT", "ABILTY", "ABJMOQ", "ACDEMP",
-      "ACELRS", "ADENVZ", "AHMORS", "BIFORX",
-      "DENOSW", "DKNOTU", "EEFHIY", "EGKLUY",
-      "EGINTV", "EHINPS", "ELPSTU", "GILRUW"
-    ];
-
-    dice.sort(() => Math.random() - 0.5);
-    const board = [];
-    for (let i = 0; i < 4; i++) {
-      const row = [];
-      for (let j = 0; j < 4; j++) {
-        const die = dice[i * 4 + j];
-        const letter = die[Math.floor(Math.random() * 6)];
-        row.push(letter);
-      }
-      board.push(row);
-    }
-
-    boards[message.channel.id] = board;
-    words[message.channel.id] = { p1: [], p2: [] };
-    endTimes[message.channel.id] = Date.now() + 120000;
+    games[gameId].player2 = message.author.id;
+    activeGames[message.author.id] = gameId;
     saveState();
-    const boardBuffer = await createBoardImage(board);
-    const boardMessage = 'Boggle board:\n\nSend words (one per message) via DM to me. Words must be formable from adjacent letters (horizontal, vertical, diagonal), no reusing letters in one word, at least 3 letters long.';
-    const timestamp = Math.floor(Date.now() / 1000) + 120;
-    const countdownMessage = `Time left: <t:${timestamp}:R>`;
-    const sendToPlayer = (userId) => {
-      client.users.fetch(userId).then(u => {
-        u.send({ content: boardMessage, files: [{ attachment: boardBuffer, name: 'boggle-board.png' }] });
-        u.send(countdownMessage);
-      }).catch(console.error);
-    };
-    sendToPlayer(games[message.channel.id].player1);
-    sendToPlayer(games[message.channel.id].player2);
-    setTimeout(() => endGame(message.channel.id, client, message.channel), 120000);
+    if (games[gameId].gameType === 'boggle') {
+      const dice = [
+        "AACIOT", "ABILTY", "ABJMOQ", "ACDEMP",
+        "ACELRS", "ADENVZ", "AHMORS", "BIFORX",
+        "DENOSW", "DKNOTU", "EEFHIY", "EGKLUY",
+        "EGINTV", "EHINPS", "ELPSTU", "GILRUW"
+      ];
+      dice.sort(() => Math.random() - 0.5);
+      const board = [];
+      for (let i = 0; i < 4; i++) {
+        const row = [];
+        for (let j = 0; j < 4; j++) {
+          const die = dice[i * 4 + j];
+          const letter = die[Math.floor(Math.random() * 6)];
+          row.push(letter);
+        }
+        board.push(row);
+      }
+      boards[gameId] = board;
+      words[gameId] = { p1: [], p2: [] };
+      endTimes[gameId] = Date.now() + 120000;
+      saveState();
+      const boardBuffer = await createBoardImage(board);
+      const boardMessage = 'Boggle board:\n\nSend words (one per message) via DM to me. Words must be formable from adjacent letters (horizontal, vertical, diagonal), no reusing letters in one word, at least 3 letters long.';
+      const timestamp = Math.floor(Date.now() / 1000) + 120;
+      const countdownMessage = `Time left: <t:${timestamp}:R>`;
+      const sendToPlayer = (userId) => {
+        client.users.fetch(userId).then(u => {
+          u.send({ content: boardMessage, files: [{ attachment: boardBuffer, name: 'boggle-board.png' }] });
+          u.send(countdownMessage);
+        }).catch(console.error);
+      };
+      sendToPlayer(games[gameId].player1);
+      sendToPlayer(games[gameId].player2);
+      setTimeout(() => endGame(gameId, client, message.channel), 120000);
+    } else if (games[gameId].gameType === 'battleship') {
+      await message.channel.send('Second player joined! Place your ships via DM.');
+      const sendInstructions = async (userId, playerKey) => {
+        const user = await client.users.fetch(userId);
+        user.send('Place your ships: carrier (5), battleship (4), cruiser (3), submarine (3), destroyer (2)');
+        user.send('Command: place <ship> <coord> <dir> e.g. place carrier A1 h');
+        user.send('Coords A1-J10, dir h horizontal, v vertical');
+        const ownKey = `${playerKey}Own`;
+        const ownGrid = battleshipBoards[gameId][ownKey];
+        const img = await createBattleshipImage(ownGrid, true);
+        user.send({ content: 'Your current board:', files: [{ attachment: img, name: 'own.png' }] });
+      };
+      await sendInstructions(games[gameId].player1, 'p1');
+      await sendInstructions(games[gameId].player2, 'p2');
+    }
   },
 
   cah: async (message) => {
@@ -798,28 +926,6 @@ client.on('messageCreate', async (message) => {
   if (message.author.id === client.user.id) return;
 
   if (message.channel.type === 'DM') {
-    const boggleGameId = activeGames[message.author.id];
-    if (boggleGameId && games[boggleGameId] && Date.now() < endTimes[boggleGameId] &&
-        (message.author.id === games[boggleGameId].player1 || message.author.id === games[boggleGameId].player2)) {
-      const player = message.author.id === games[boggleGameId].player1 ? 'p1' : 'p2';
-      const word = message.content.trim().toLowerCase();
-      const board = boards[boggleGameId];
-      if (isValidWord(board, word) && !words[boggleGameId][player].includes(word)) {
-        const isValid = await isValidEnglishWord(word);
-        if (isValid) {
-          words[boggleGameId][player].push(word);
-          await message.reply(`Valid word added: ${word}`);
-          console.log(`Player ${message.author.tag} submitted valid word: ${word} in game ${boggleGameId}`);
-        } else {
-          await message.reply(`Invalid word: ${word} is not a recognized English word`);
-        }
-      } else {
-        await message.reply(`Invalid word: ${word} (either not formable, too short, or duplicate)`);
-      }
-      saveState();
-      return;
-    }
-
     const cahGameId = cahActivePlayers[message.author.id];
     if (cahGameId && cahCurrent[cahGameId]) {
       const game = cahGames[cahGameId];
@@ -851,6 +957,140 @@ client.on('messageCreate', async (message) => {
         await showSubmissions(cahGameId);
       }
       return;
+    }
+
+    const gameId = activeGames[message.author.id];
+    if (gameId && games[gameId]) {
+      if (games[gameId].gameType === 'boggle') {
+        if (Date.now() < endTimes[gameId] &&
+          (message.author.id === games[gameId].player1 || message.author.id === games[gameId].player2)) {
+          const player = message.author.id === games[gameId].player1 ? 'p1' : 'p2';
+          const word = message.content.trim().toLowerCase();
+          const board = boards[gameId];
+          if (isValidWord(board, word) && !words[gameId][player].includes(word)) {
+            const isValid = await isValidEnglishWord(word);
+            if (isValid) {
+              words[gameId][player].push(word);
+              await message.reply(`Valid word added: ${word}`);
+              console.log(`Player ${message.author.tag} submitted valid word: ${word} in game ${gameId}`);
+            } else {
+              await message.reply(`Invalid word: ${word} is not a recognized English word`);
+            }
+          } else {
+            await message.reply(`Invalid word: ${word} (either not formable, too short, or duplicate)`);
+          }
+          saveState();
+          return;
+        }
+      } else if (games[gameId].gameType === 'battleship') {
+        const playerKey = message.author.id === games[gameId].player1 ? 'p1' : 'p2';
+        const oppKey = playerKey === 'p1' ? 'p2' : 'p1';
+        if (!placementPhases[gameId][playerKey]) {
+          const content = message.content.trim().toLowerCase();
+          if (!content.startsWith('place ')) {
+            return message.reply('Invalid command. Use: place <ship> <coord> <dir> e.g. place carrier a1 h');
+          }
+          const parts = content.slice(6).split(' ');
+          if (parts.length !== 3) {
+            return message.reply('Invalid format.');
+          }
+          const ship = parts[0];
+          let coord = parts[1].toUpperCase();
+          const dir = parts[2];
+          if (!shipSizes[ship]) {
+            return message.reply('Invalid ship. Valid: carrier, battleship, cruiser, submarine, destroyer');
+          }
+          if (placedShips[gameId][playerKey].includes(ship)) {
+            return message.reply('Ship already placed.');
+          }
+          if (!/^[A-J]([1-9]|10)$/.test(coord)) {
+            return message.reply('Invalid coord e.g. A1 or J10');
+          }
+          const col = coord.charCodeAt(0) - 65;
+          const row = parseInt(coord.slice(1)) - 1;
+          const size = shipSizes[ship];
+          let positions = [];
+          if (dir === 'h') {
+            if (col + size > 10) return message.reply('Out of bounds.');
+            for (let i = 0; i < size; i++) {
+              positions.push([row, col + i]);
+            }
+          } else if (dir === 'v') {
+            if (row + size > 10) return message.reply('Out of bounds.');
+            for (let i = 0; i < size; i++) {
+              positions.push([row + i, col]);
+            }
+          } else {
+            return message.reply('Direction must be h or v.');
+          }
+          const ownGrid = battleshipBoards[gameId][`${playerKey}Own`];
+          for (let [r, c] of positions) {
+            if (ownGrid[r][c] !== ' ') return message.reply('Overlap or occupied.');
+          }
+          for (let [r, c] of positions) {
+            ownGrid[r][c] = 'S';
+          }
+          placedShips[gameId][playerKey].push(ship);
+          saveState();
+          await message.reply(`Placed ${ship} at ${coord} ${dir.toUpperCase()}`);
+          const ownImg = await createBattleshipImage(ownGrid, true);
+          await message.channel.send({ files: [{ attachment: ownImg, name: 'own.png' }] });
+          if (placedShips[gameId][playerKey].length === 5) {
+            placementPhases[gameId][playerKey] = true;
+            saveState();
+            await message.reply('All ships placed! Waiting for opponent.');
+            if (placementPhases[gameId].p1 && placementPhases[gameId].p2) {
+              currentTurns[gameId] = 'p1';
+              saveState();
+              const channel = await client.channels.fetch(gameId);
+              channel.send('Both players have placed their ships! Game starts. Player 1\'s turn.');
+              await sendBoards(gameId, 'p1');
+              await sendBoards(gameId, 'p2');
+            }
+          }
+        } else {
+          if (currentTurns[gameId] !== playerKey) {
+            return message.reply('Not your turn!');
+          }
+          const coord = message.content.trim().toUpperCase();
+          if (!/^[A-J]([1-9]|10)$/.test(coord)) {
+            return message.reply('Invalid coord e.g. A1 or J10');
+          }
+          const col = coord.charCodeAt(0) - 65;
+          const row = parseInt(coord.slice(1)) - 1;
+          const trackingGrid = battleshipBoards[gameId][`${playerKey}Tracking`];
+          if (trackingGrid[row][col] !== ' ') {
+            return message.reply('Already guessed there.');
+          }
+          const oppOwnGrid = battleshipBoards[gameId][`${oppKey}Own`];
+          const isHit = oppOwnGrid[row][col] === 'S';
+          const mark = isHit ? 'H' : 'M';
+          oppOwnGrid[row][col] = mark;
+          trackingGrid[row][col] = mark;
+          saveState();
+          const channel = await client.channels.fetch(gameId);
+          channel.send(`<@${message.author.id}> guessed ${coord}: ${isHit ? 'Hit!' : 'Miss!'}`);
+          const oppHits = oppOwnGrid.flat().filter(cell => cell === 'H').length;
+          if (oppHits === 17) {
+            channel.send(`<@${message.author.id}> wins! All opponent's ships sunk.`);
+            delete activeGames[games[gameId].player1];
+            delete activeGames[games[gameId].player2];
+            delete games[gameId];
+            delete battleshipBoards[gameId];
+            delete currentTurns[gameId];
+            delete placedShips[gameId];
+            delete placementPhases[gameId];
+            saveState();
+            return;
+          }
+          currentTurns[gameId] = oppKey;
+          saveState();
+          await sendBoards(gameId, 'p1');
+          await sendBoards(gameId, 'p2');
+          await message.reply(`${isHit ? 'Hit' : 'Miss'} on ${coord}`);
+        }
+        return;
+      }
     }
   }
 
