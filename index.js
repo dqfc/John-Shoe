@@ -1,8 +1,10 @@
 const { Client, MessageAttachment } = require('discord.js-selfbot-v13');
 const Canvas = require('canvas');
-const fs = require('fs');
+const fs = require('fs').promises;
+const path = require('path');
 require('dotenv').config();
 const https = require('https');
+
 const client = new Client({
   checkUpdate: false
 });
@@ -23,6 +25,75 @@ const statuses = [
   { name: 'tort baller: the movie', type: 'WATCHING' }
 ];
 
+let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
+let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {}, customWhiteCards = [];
+let battleshipBoards = {}, currentTurns = {}, placedShips = {}, placementPhases = {}, boardMessages = {};
+const shipSizes = { carrier: 5, battleship: 4, cruiser: 3, submarine: 3, destroyer: 2 };
+
+// JSON utility functions
+const { loadJson, saveJson } = require('./utils/jsonUtils');
+
+async function loadState() {
+  try {
+    games = await loadJson('games.json') || {};
+    words = await loadJson('words.json') || {};
+    endTimes = await loadJson('endTimes.json') || {};
+    boards = await loadJson('boards.json') || {};
+    activeGames = await loadJson('activeGames.json') || {};
+    cahGames = await loadJson('cahGames.json') || {};
+    cahHands = await loadJson('cahHands.json') || {};
+    cahDecks = await loadJson('cahDecks.json') || {};
+    cahCurrent = await loadJson('cahCurrent.json') || {};
+    cahActivePlayers = await loadJson('cahActivePlayers.json') || {};
+    const rawCustomCards = await loadJson('customWhiteCards.json');
+    customWhiteCards = Array.isArray(rawCustomCards) ? rawCustomCards : [];
+    if (!Array.isArray(rawCustomCards)) {
+      console.warn('Warning: customWhiteCards.json is not an array. Resetting to empty array.');
+      await saveJson('customWhiteCards.json', []);
+    }
+    battleshipBoards = await loadJson('battleshipBoards.json') || {};
+    currentTurns = await loadJson('currentTurns.json') || {};
+    placedShips = await loadJson('placedShips.json') || {};
+    placementPhases = await loadJson('placementPhases.json') || {};
+    boardMessages = await loadJson('boardMessages.json') || {};
+  } catch (e) {
+    console.error('Failed to load state files:', e.message);
+    const files = ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json', 'battleshipBoards.json', 'currentTurns.json', 'placedShips.json', 'placementPhases.json', 'boardMessages.json'];
+    for (const file of files) {
+      await saveJson(file, file === 'customWhiteCards.json' ? [] : {});
+    }
+    customWhiteCards = [];
+  }
+}
+
+async function saveState() {
+  await saveJson('games.json', games);
+  await saveJson('words.json', words);
+  await saveJson('endTimes.json', endTimes);
+  await saveJson('boards.json', boards);
+  await saveJson('activeGames.json', activeGames);
+  await saveJson('cahGames.json', cahGames);
+  await saveJson('cahHands.json', cahHands);
+  await saveJson('cahDecks.json', cahDecks);
+  await saveJson('cahCurrent.json', cahCurrent);
+  await saveJson('cahActivePlayers.json', cahActivePlayers);
+  await saveJson('customWhiteCards.json', customWhiteCards);
+  await saveJson('battleshipBoards.json', battleshipBoards);
+  await saveJson('currentTurns.json', currentTurns);
+  await saveJson('placedShips.json', placedShips);
+  await saveJson('placementPhases.json', placementPhases);
+  await saveJson('boardMessages.json', boardMessages);
+}
+
+// Load commands dynamically
+const commands = {};
+const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
+for (const file of commandFiles) {
+  const command = require(`./commands/${file}`);
+  const commandName = file.split('.')[0].toLowerCase();
+  commands[commandName] = command;
+}
+
 function rotateStatus() {
   const status = statuses[Math.floor(Math.random() * statuses.length)];
   client.user.setPresence({
@@ -31,64 +102,6 @@ function rotateStatus() {
   });
   console.log(`Updated status to: ${status.type} ${status.name}`);
 }
-
-let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
-let cahGames = {}, cahHands = {}, cahDecks = {}, cahCurrent = {}, cahActivePlayers = {}, customWhiteCards = [];
-let battleshipBoards = {}, currentTurns = {}, placedShips = {}, placementPhases = {}, boardMessages = {};
-const shipSizes = { carrier: 5, battleship: 4, cruiser: 3, submarine: 3, destroyer: 2 };
-
-function loadState() {
-  try {
-    games = JSON.parse(fs.readFileSync('games.json', 'utf8')) || {};
-    words = JSON.parse(fs.readFileSync('words.json', 'utf8')) || {};
-    endTimes = JSON.parse(fs.readFileSync('endTimes.json', 'utf8')) || {};
-    boards = JSON.parse(fs.readFileSync('boards.json', 'utf8')) || {};
-    activeGames = JSON.parse(fs.readFileSync('activeGames.json', 'utf8')) || {};
-    cahGames = JSON.parse(fs.readFileSync('cahGames.json', 'utf8')) || {};
-    cahHands = JSON.parse(fs.readFileSync('cahHands.json', 'utf8')) || {};
-    cahDecks = JSON.parse(fs.readFileSync('cahDecks.json', 'utf8')) || {};
-    cahCurrent = JSON.parse(fs.readFileSync('cahCurrent.json', 'utf8')) || {};
-    cahActivePlayers = JSON.parse(fs.readFileSync('cahActivePlayers.json', 'utf8')) || {};
-    const rawCustomCards = JSON.parse(fs.readFileSync('customWhiteCards.json', 'utf8'));
-    customWhiteCards = Array.isArray(rawCustomCards) ? rawCustomCards : [];
-    if (!Array.isArray(rawCustomCards)) {
-      console.warn('Warning: customWhiteCards.json is not an array. Resetting to empty array.');
-      fs.writeFileSync('customWhiteCards.json', JSON.stringify([]));
-    }
-    battleshipBoards = JSON.parse(fs.readFileSync('battleshipBoards.json', 'utf8')) || {};
-    currentTurns = JSON.parse(fs.readFileSync('currentTurns.json', 'utf8')) || {};
-    placedShips = JSON.parse(fs.readFileSync('placedShips.json', 'utf8')) || {};
-    placementPhases = JSON.parse(fs.readFileSync('placementPhases.json', 'utf8')) || {};
-    boardMessages = JSON.parse(fs.readFileSync('boardMessages.json', 'utf8')) || {};
-  } catch (e) {
-    console.error('Failed to load state files:', e.message);
-    ['games.json', 'words.json', 'endTimes.json', 'boards.json', 'activeGames.json', 'cahGames.json', 'cahHands.json', 'cahDecks.json', 'cahCurrent.json', 'cahActivePlayers.json', 'customWhiteCards.json', 'battleshipBoards.json', 'currentTurns.json', 'placedShips.json', 'placementPhases.json', 'boardMessages.json'].forEach(file => {
-      fs.writeFileSync(file, file === 'customWhiteCards.json' ? '[]' : '{}');
-    });
-    customWhiteCards = [];
-  }
-}
-
-function saveState() {
-  fs.writeFileSync('games.json', JSON.stringify(games));
-  fs.writeFileSync('words.json', JSON.stringify(words));
-  fs.writeFileSync('endTimes.json', JSON.stringify(endTimes));
-  fs.writeFileSync('boards.json', JSON.stringify(boards));
-  fs.writeFileSync('activeGames.json', JSON.stringify(activeGames));
-  fs.writeFileSync('cahGames.json', JSON.stringify(cahGames));
-  fs.writeFileSync('cahHands.json', JSON.stringify(cahHands));
-  fs.writeFileSync('cahDecks.json', JSON.stringify(cahDecks));
-  fs.writeFileSync('cahCurrent.json', JSON.stringify(cahCurrent));
-  fs.writeFileSync('cahActivePlayers.json', JSON.stringify(cahActivePlayers));
-  fs.writeFileSync('customWhiteCards.json', JSON.stringify(customWhiteCards));
-  fs.writeFileSync('battleshipBoards.json', JSON.stringify(battleshipBoards));
-  fs.writeFileSync('currentTurns.json', JSON.stringify(currentTurns));
-  fs.writeFileSync('placedShips.json', JSON.stringify(placedShips));
-  fs.writeFileSync('placementPhases.json', JSON.stringify(placementPhases));
-  fs.writeFileSync('boardMessages.json', JSON.stringify(boardMessages));
-}
-
-loadState();
 
 async function isValidEnglishWord(word) {
   try {
@@ -187,46 +200,38 @@ async function createBattleshipImage(ownGrid, trackingGrid) {
   ctx.font = '20px sans-serif';
   ctx.textAlign = 'center';
 
-  // Labels for Own Board
   ctx.fillText('Your Board', 250, 20);
   for (let i = 0; i < 10; i++) {
     ctx.fillText(String.fromCharCode(65 + i), 50 + i * cellSize + cellSize / 2, 70);
     ctx.fillText((i + 1).toString(), 25, 90 + i * cellSize + cellSize / 2);
   }
-  // Labels for Tracking Board
   ctx.fillText('Target Board', 650, 20);
   for (let i = 0; i < 10; i++) {
     ctx.fillText(String.fromCharCode(65 + i), 450 + i * cellSize + cellSize / 2, 70);
     ctx.fillText((i + 1).toString(), 425, 90 + i * cellSize + cellSize / 2);
   }
 
-  // Draw grids
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 10; i++) {
-    // Own grid vertical
     ctx.beginPath();
     ctx.moveTo(50 + i * cellSize, 90);
     ctx.lineTo(50 + i * cellSize, 90 + 10 * cellSize);
     ctx.stroke();
-    // Own grid horizontal
     ctx.beginPath();
     ctx.moveTo(50, 90 + i * cellSize);
     ctx.lineTo(50 + 10 * cellSize, 90 + i * cellSize);
     ctx.stroke();
-    // Tracking grid vertical
     ctx.beginPath();
     ctx.moveTo(450 + i * cellSize, 90);
     ctx.lineTo(450 + i * cellSize, 90 + 10 * cellSize);
     ctx.stroke();
-    // Tracking grid horizontal
     ctx.beginPath();
     ctx.moveTo(450, 90 + i * cellSize);
     ctx.lineTo(450 + 10 * cellSize, 90 + i * cellSize);
     ctx.stroke();
   }
 
-  // Draw own grid
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 10; c++) {
       const x = 50 + c * cellSize;
@@ -255,7 +260,6 @@ async function createBattleshipImage(ownGrid, trackingGrid) {
     }
   }
 
-  // Draw tracking grid
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 10; c++) {
       const x = 450 + c * cellSize;
@@ -299,7 +303,7 @@ async function updateBoards(gameId, playerKey) {
     const message = await user.send({ content, files: [{ attachment: img, name: 'boards.png' }] });
     boardMessages[gameId] = boardMessages[gameId] || {};
     boardMessages[gameId][playerKey] = message.id;
-    saveState();
+    await saveState();
   } else {
     const messageId = boardMessages[gameId][playerKey];
     try {
@@ -309,7 +313,7 @@ async function updateBoards(gameId, playerKey) {
       console.error(`Failed to edit message for ${playerKey}:`, error);
       const message = await user.send({ content, files: [{ attachment: img, name: 'boards.png' }] });
       boardMessages[gameId][playerKey] = message.id;
-      saveState();
+      await saveState();
     }
   }
 }
@@ -345,7 +349,7 @@ async function endGame(gameId, client, channel) {
   delete words[gameId];
   delete endTimes[gameId];
   delete boards[gameId];
-  saveState();
+  await saveState();
 }
 
 async function fetchCards() {
@@ -405,7 +409,7 @@ async function startRound(gameId) {
     showed: false,
     anonCount: 0
   };
-  saveState();
+  await saveState();
   channel.send(`# Round Start!\nBlack card: \`${black.text}\` (Pick: ${black.pick})\nCard Czar: <@${czarId}>`);
   for (const playerId of game.players) {
     if (playerId === czarId) continue;
@@ -442,7 +446,7 @@ async function showSubmissions(gameId) {
   });
   current.pickMap = pickMap;
   current.showed = true;
-  saveState();
+  await saveState();
   channel.send(`${list}\nCzar <@${czarId}>, choose winner with +pick <number>`);
 }
 
@@ -459,513 +463,8 @@ async function endCahGame(gameId, reason) {
   delete cahHands[gameId];
   delete cahDecks[gameId];
   delete cahCurrent[gameId];
-  saveState();
+  await saveState();
 }
-
-const commands = {
-  hello: async (message, args) => {
-    await message.channel.send('hi');
-    console.log(`User ${message.author.tag} used +hello`);
-  },
-
-  quote: async (message, args) => {
-    if (!message.reference) return;
-    try {
-      const originalMsg = await message.channel.messages.fetch(message.reference.messageId);
-      console.log('Message reference:', message.reference);
-      console.log('Referenced message:', {
-        content: originalMsg.content,
-        author: originalMsg.author.username,
-        messageId: originalMsg.id,
-        isBot: originalMsg.author.bot
-      });
-
-      if (originalMsg.author.id === message.author.id && originalMsg.author.bot) {
-        console.log('Attempted to quote bot\'s own message');
-        await message.reply('Cannot quote my own messages!');
-        return;
-      }
-
-      let text = originalMsg.content ? originalMsg.content.trim() : '';
-      const displayName = originalMsg.author.globalName || originalMsg.author.username || 'Unknown Author';
-      const username = originalMsg.author.username || 'unknown';
-
-      if (!text || text.length === 0 || text.startsWith('+')) {
-        console.log('Invalid text detected:', { text });
-        await message.reply('Cannot quote an empty message or a command!');
-        return;
-      }
-
-      let avatarUrl = originalMsg.author.avatarURL({ dynamic: false, size: 128 });
-      if (avatarUrl) {
-        avatarUrl = avatarUrl.split('?')[0];
-      } else {
-        avatarUrl = `https://cdn.discordapp.com/embed/avatars/${originalMsg.author.discriminator % 5}.png`;
-      }
-
-      console.log('Input for Voids API:', { text, displayName, username, avatarUrl });
-
-      const requestBody = {
-        username: username,
-        display_name: displayName,
-        text: text,
-        avatar: avatarUrl,
-        color: true
-      };
-
-      const apiResponse = await fetch('https://api.voids.top/quote', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!apiResponse.ok) {
-        const errorBody = await apiResponse.text();
-        console.error('API Error Details:', {
-          status: apiResponse.status,
-          statusText: apiResponse.statusText,
-          body: errorBody
-        });
-        await message.reply(`API error: ${errorBody || 'Bad request - check logs for details.'}`);
-        return;
-      }
-
-      const apiData = await apiResponse.json();
-      console.log('API response:', apiData);
-
-      if (!apiData.success || !apiData.url) {
-        console.error('Invalid API response:', apiData);
-        await message.reply('Failed to generate quote image from API.');
-        return;
-      }
-
-      const imageResponse = await fetch(apiData.url);
-      if (!imageResponse.ok) {
-        console.error('Image download failed:', {
-          status: imageResponse.status,
-          statusText: imageResponse.statusText
-        });
-        await message.reply('Failed to download quote image.');
-        return;
-      }
-
-      const imageBuffer = await imageResponse.arrayBuffer();
-      const buffer = Buffer.from(imageBuffer);
-      const attachment = new MessageAttachment(buffer, 'quote.png');
-      await message.reply({ files: [attachment] });
-      console.log(`User ${message.author.tag} used +quote`);
-    } catch (error) {
-      console.error('Error processing +quote:', error);
-      await message.reply('Something went wrong generating the quote.');
-    }
-  },
-
-  fox: async (message, args) => {
-    console.log(`User ${message.author.tag} used +fox`);
-    https.get('https://randomfox.ca/floof/', (res) => {
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      res.on('end', () => {
-        try {
-          const jsonResponse = JSON.parse(data);
-          const foximage = jsonResponse.image;
-          console.log('Fox image URL:', foximage);
-          message.channel.send(foximage);
-        } catch (error) {
-          console.error('Error parsing JSON:', error.message);
-        }
-      });
-    }).on('error', (error) => {
-      console.error('Error making GET request:', error.message);
-    });
-  },
-
-  cat: async (message, args) => {
-    console.log(`User ${message.author.tag} used +cat`);
-    try {
-      const response = await fetch('https://api.thecatapi.com/v1/images/search');
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      const jsonResponse = await response.json();
-      const catImage = jsonResponse[0].url;
-      console.log('Cat image URL:', catImage);
-      message.channel.send(catImage);
-    } catch (error) {
-      console.error('Error fetching or parsing data:', error.message);
-      message.channel.send('Sorry, I couldn’t fetch a cat image right now!');
-    }
-  },
-
-  dog: async (message, args) => {
-    console.log(`User ${message.author.tag} used +dog`);
-    try {
-      const response = await fetch('https://api.thedogapi.com/v1/images/search');
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      const jsonResponse = await response.json();
-      const dogImage = jsonResponse[0].url;
-      console.log('Dog image URL:', dogImage);
-      message.channel.send(dogImage);
-    } catch (error) {
-      console.error('Error fetching or parsing data:', error.message);
-      message.channel.send('Sorry, I couldn’t fetch a dog image right now!');
-    }
-  },
-
-  help: async (message, args) => {
-    const helpText = `
-**Available Commands:**
-- \`+hello\` - hello world
-- \`+ping\` - pingle
-- \`+help\` - shows this help message
-- \`+fox\` - get picture of fox
-- \`+cat\` - get picture of cat
-- \`+dog\` - get picture of dog
-- \`+gif\` - send random gif
-- \`+gay <@user>\` - find how much gay someone is
-- \`+lesbians <@user>\` - find how much lesbians someone is
-- \`+burn <text>\` - burning text
-- \`+quote\` - quote a message (reply to someone)
-- \`+boggle\` - play boggle
-- \`+battleship\` - play battleship
-- \`+join\` - join boggle or battleship game
-- \`+cah\` - start Cards Against Humanity game (requires 4 players)
-- \`+joincah\` - join CAH game
-- \`+pick <num>\` - (CAH Czar only) pick winning submission
-    `;
-    await message.channel.send(helpText);
-  },
-
-  ping: async (message, args) => {
-    console.log(`User ${message.author.tag} used +ping`);
-    await message.channel.send('pingle');
-  },
-
-  gif: async (message, args) => {
-    const responses = [
-      'https://tenor.com/view/df-hh-gif-26247943',
-      'https://tenor.com/view/mr-utah-dance-gif-11499022268151868481',
-      'https://cdn.discordapp.com/attachments/1295104679918829639/1390878729458290750/twitter_1940972343406600328.gif?ex=68f8e702&is=68f79582&hm=986417ca523ab939850a3d82249ffb5fa6e14f37a1f2ca4e007d6e1b67e2c16e&',
-      'https://tenor.com/view/kurt-cobain-nirvana-grunge-kurt-cobain-gif-26486856',
-      'https://tenor.com/view/cat-cat-looking-around-looking-around-orange-cat-doom-1993-gif-1032019449693505825',
-      'https://tenor.com/view/keemxdaxtruth-lmao-dead-nope-gif-14774804',
-      'https://tenor.com/view/bro-just-typing-shit-atm-man-funny-tiktok-gif-6754206601808444804',
-      'https://tenor.com/view/cat-gif-22201828',
-      'https://cdn.discordapp.com/attachments/1356028858758987929/1395288902780059680/Tumblr_l_2976258243386051.gif?ex=68f288cd&is=68f1374d&hm=480fdeec339dade188e0ab6b1359b7fcad9edf73ff52cac9c75fa1c07e7697d5&',
-      'https://tenor.com/view/we-got-this-we-can-do-it-lets-do-this-its-go-time-gif-18162766352197200050',
-      'https://cdn.discordapp.com/attachments/1236480298225500270/1312810679257796648/9F6DF7B0-AE36-495E-84F6-3BCB85D43273.gif?ex=68f26838&is=68f116b8&hm=b0bbe8d8ed8590a5120d6f072c973c5253dafcbb6d73c4fe86bd4a5840c5d17f&',
-      'https://tenor.com/view/bedankt-stemmen-d66-gif-20750336',
-      'https://tenor.com/view/blue-protocol-discord-everyday-xp-rank-2-gif-15559150468971950141',
-      'https://tenor.com/view/basketball-miss-failure-fail-gif-24912602',
-      'https://cdn.discordapp.com/attachments/1324276331026055273/1397803254062120970/attachment.gif?ex=68f273f9&is=68f12279&hm=2d94d68e15c413a76c6ffec49a7ff3c977143a7a141937fbda7972c1a1042572&',
-      'https://cdn.discordapp.com/attachments/1018055445279154218/1402821050319769651/image0.gif?ex=68f2e8e9&is=68f19769&hm=2e96ad6024a20e7f6a91713cb9e409bbe2646dcf00a671ae318802da18f2a0f7&',
-      'https://cdn.discordapp.com/attachments/1324276331026055273/1382596101038801036/twitter_1932477189649297556.gif?ex=68f28035&is=68f12eb5&hm=556efb2430856c411bbb1f01068205d6c1793894177703ccddf9e13c7a4c81e1&',
-      'https://cdn.discordapp.com/attachments/1018055445279154217/1390017579443294208/uncaption.gif?ex=68f3cac0&is=68f27940&hm=e55070068622591aa75ea39e97be9515fb20867702e24b65faf256823e52da44&'
-    ];
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    await message.channel.send(randomResponse);
-    console.log(`User ${message.author.tag} used +gif with gif ${randomResponse}`);
-  },
-
-  burn: async (message, args) => {
-    if (args.length === 0) {
-      await message.channel.send('Please provide text, e.g., +burn MyText');
-      return;
-    }
-    const text = args.join(' ');
-    try {
-      const cooltextResponse = await fetch("https://cooltext.com/PostChange", {
-        "credentials": "include",
-        "headers": {
-          "User-Agent": "Jordan/1.0",
-          "Accept": "*/*",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "X-Requested-With": "XMLHttpRequest",
-          "Sec-Fetch-Dest": "empty",
-          "Sec-Fetch-Mode": "cors",
-          "Sec-Fetch-Site": "same-origin"
-        },
-        "referrer": "https://cooltext.com/Logo-Design-Burning",
-        "body": `LogoID=4&Text=${encodeURIComponent(text)}&FontSize=70&Color1_color=%23FF0000&Integer1=15&Boolean1=on&Integer9=0&Integer13=on&Integer12=on&BackgroundColor_color=%23FFFFFF`,
-        "method": "POST",
-        "mode": "cors"
-      });
-      const cooltextData = await cooltextResponse.json();
-      if (!cooltextData.renderLocation) {
-        await message.channel.send('Error: Could not generate image link');
-        console.log(`Error: No renderLocation in response for +burn by ${message.author.tag}`);
-        return;
-      }
-      const uploadResponse = await fetch("https://0x0.st", {
-        "method": "POST",
-        "headers": {
-          "User-Agent": "Jordan/1.0",
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        "body": `url=${encodeURIComponent(cooltextData.renderLocation)}`
-      });
-      const uploadLink = await uploadResponse.text();
-      if (!uploadLink.startsWith('https://0x0.st/')) {
-        await message.channel.send('Error: Failed to upload image to 0x0.st');
-        console.log(`Error: Invalid 0x0.st response for +burn by ${message.author.tag}: ${uploadLink}`);
-        return;
-      }
-      await message.channel.send(uploadLink);
-      console.log(`User ${message.author.tag} used +burn with text "${text}", uploaded to ${uploadLink}`);
-    } catch (error) {
-      await message.channel.send('Error: Failed to process burn command');
-      console.error(`Error in +burn for ${message.author.tag}:`, error);
-    }
-  },
-
-  gay: async (message, args) => {
-    if (args.length === 0) {
-      await message.channel.send('Please mention a user, e.g., +gay @person');
-      return;
-    }
-    const mention = args[0];
-    if (!mention.match(/^<@!?[0-9]+>$/)) {
-      await message.channel.send('Please provide a valid user mention, e.g., +gay @person');
-      return;
-    }
-    const randomNumber = Math.floor(Math.random() * 100) + 1;
-    await message.channel.send(`${mention} is **${randomNumber}%** gay`);
-    console.log(`User ${message.author.tag} used +gay with mention ${mention}`);
-  },
-
-  lesbians: async (message, args) => {
-    if (args.length === 0) {
-      await message.channel.send('Please mention a user, e.g., +lesbians @person');
-      return;
-    }
-    const mention = args[0];
-    if (!mention.match(/^<@!?[0-9]+>$/)) {
-      await message.channel.send('Please provide a valid user mention, e.g., +lesbians @person');
-      return;
-    }
-    const randomNumber = Math.floor(Math.random() * 100) + 1;
-    await message.channel.send(`${mention} is **${randomNumber}%** lesbians`);
-    console.log(`User ${message.author.tag} used +lesbians with mention ${mention}`);
-  },
-
-  boggle: async (message) => {
-    console.log(`User ${message.author.tag} used +boggle in channel ${message.channel.id}`);
-    const gameId = message.channel.id;
-    if (games[gameId]) {
-      return message.channel.send('A game is already in progress in this channel!');
-    }
-    games[gameId] = { player1: message.author.id, player2: null, channel: message.channel.id, gameType: 'boggle' };
-    activeGames[message.author.id] = gameId;
-    saveState();
-    await message.channel.send('Boggle game started! Use +join to join as the second player.');
-  },
-
-  battleship: async (message) => {
-    console.log(`User ${message.author.tag} used +battleship in channel ${message.channel.id}`);
-    const gameId = message.channel.id;
-    if (games[gameId]) {
-      return message.channel.send('A game is already in progress in this channel!');
-    }
-    games[gameId] = { player1: message.author.id, player2: null, channel: message.channel.id, gameType: 'battleship' };
-    activeGames[message.author.id] = gameId;
-    battleshipBoards[gameId] = {
-      p1Own: Array(10).fill().map(() => Array(10).fill(' ')),
-      p1Tracking: Array(10).fill().map(() => Array(10).fill(' ')),
-      p2Own: Array(10).fill().map(() => Array(10).fill(' ')),
-      p2Tracking: Array(10).fill().map(() => Array(10).fill(' '))
-    };
-    placementPhases[gameId] = { p1: false, p2: false };
-    placedShips[gameId] = { p1: [], p2: [] };
-    saveState();
-    await message.channel.send('Battleship game started! Use +join to join as the second player.');
-  },
-
-  join: async (message) => {
-    console.log(`User ${message.author.tag} used +join in channel ${message.channel.id}`);
-    const gameId = message.channel.id;
-    if (!games[gameId]) {
-      return message.channel.send('No game is currently active in this channel!');
-    }
-    if (games[gameId].player2) {
-      return message.channel.send('The game is already full!');
-    }
-    if (message.author.id === games[gameId].player1) {
-      return message.channel.send('You cannot join your own game!');
-    }
-    games[gameId].player2 = message.author.id;
-    activeGames[message.author.id] = gameId;
-    saveState();
-    if (games[gameId].gameType === 'boggle') {
-      const dice = [
-        "AACIOT", "ABILTY", "ABJMOQ", "ACDEMP",
-        "ACELRS", "ADENVZ", "AHMORS", "BIFORX",
-        "DENOSW", "DKNOTU", "EEFHIY", "EGKLUY",
-        "EGINTV", "EHINPS", "ELPSTU", "GILRUW"
-      ];
-      dice.sort(() => Math.random() - 0.5);
-      const board = [];
-      for (let i = 0; i < 4; i++) {
-        const row = [];
-        for (let j = 0; j < 4; j++) {
-          const die = dice[i * 4 + j];
-          const letter = die[Math.floor(Math.random() * 6)];
-          row.push(letter);
-        }
-        board.push(row);
-      }
-      boards[gameId] = board;
-      words[gameId] = { p1: [], p2: [] };
-      endTimes[gameId] = Date.now() + 120000;
-      saveState();
-      const boardBuffer = await createBoardImage(board);
-      const boardMessage = 'Boggle board:\n\nSend words (one per message) via DM to me. Words must be formable from adjacent letters (horizontal, vertical, diagonal), no reusing letters in one word, at least 3 letters long.';
-      const timestamp = Math.floor(Date.now() / 1000) + 120;
-      const countdownMessage = `Time left: <t:${timestamp}:R>`;
-      const sendToPlayer = (userId) => {
-        client.users.fetch(userId).then(u => {
-          u.send({ content: boardMessage, files: [{ attachment: boardBuffer, name: 'boggle-board.png' }] });
-          u.send(countdownMessage);
-        }).catch(console.error);
-      };
-      sendToPlayer(games[gameId].player1);
-      sendToPlayer(games[gameId].player2);
-      setTimeout(() => endGame(gameId, client, message.channel), 120000);
-    } else if (games[gameId].gameType === 'battleship') {
-      await message.channel.send('Second player joined! Place your ships via DM.');
-      const sendInstructions = async (userId, playerKey) => {
-        const user = await client.users.fetch(userId);
-        user.send('Place your ships: carrier (5), battleship (4), cruiser (3), submarine (3), destroyer (2)');
-        user.send('Command: <ship> <coord> <dir> e.g. carrier A1 h');
-        user.send('Coords A1-J10, dir h horizontal, v vertical');
-        const ownKey = `${playerKey}Own`;
-        const ownGrid = battleshipBoards[gameId][ownKey];
-        const trackingGrid = battleshipBoards[gameId][`${playerKey}Tracking`];
-        const img = await createBattleshipImage(ownGrid, trackingGrid);
-        const message = await user.send({ content: 'Your current boards:', files: [{ attachment: img, name: 'boards.png' }] });
-        boardMessages[gameId] = boardMessages[gameId] || {};
-        boardMessages[gameId][playerKey] = message.id;
-        saveState();
-      };
-      await sendInstructions(games[gameId].player1, 'p1');
-      await sendInstructions(games[gameId].player2, 'p2');
-    }
-  },
-
-  cah: async (message) => {
-    const gameId = message.channel.id;
-    if (cahGames[gameId]) {
-      return message.channel.send('A CAH game is already in progress in this channel!');
-    }
-    cahGames[gameId] = {
-      players: [message.author.id],
-      czarIndex: 0,
-      scores: [],
-      channel: gameId
-    };
-    cahActivePlayers[message.author.id] = gameId;
-    cahDecks[gameId] = { blacks: [], whites: [] };
-    saveState();
-    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
-  },
-
-  joincah: async (message) => {
-    const gameId = message.channel.id;
-    if (!cahGames[gameId]) {
-      return message.channel.send('No CAH game is currently active in this channel!');
-    }
-    const game = cahGames[gameId];
-    if (game.players.length >= 4) {
-      return message.channel.send('The game is already full!');
-    }
-    if (game.players.includes(message.author.id)) {
-      return message.channel.send('You are already in the game!');
-    }
-    game.players.push(message.author.id);
-    cahActivePlayers[message.author.id] = gameId;
-    saveState();
-    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
-    if (game.players.length === 4) {
-      game.scores = new Array(4).fill(0);
-      let whiteDeck = [...customWhiteCards];
-      if (FORCE_CUSTOM_CARDS_ONLY) {
-        if (whiteDeck.length < 40) {
-          await message.channel.send('Error: Not enough custom white cards (need at least 40 for 4 players). Add more using node addWhite.js or set FORCE_CUSTOM_CARDS_ONLY to false.');
-          game.players.forEach(p => delete cahActivePlayers[p]);
-          delete cahGames[gameId];
-          delete cahDecks[gameId];
-          saveState();
-          return;
-        }
-        const fetched = await fetchCards();
-        cahDecks[gameId].blacks = fetched.blacks;
-      } else {
-        const fetchedCards = await fetchCards();
-        cahDecks[gameId].blacks = fetchedCards.blacks;
-        whiteDeck = [...whiteDeck, ...fetchedCards.whites];
-      }
-      whiteDeck.sort(() => Math.random() - 0.5);
-      cahDecks[gameId].whites = whiteDeck;
-      cahHands[gameId] = {};
-      for (let i = 0; i < 4; i++) {
-        const playerId = game.players[i];
-        const hand = cahDecks[gameId].whites.splice(0, 10);
-        cahHands[gameId][playerId] = hand;
-        await sendHand(playerId, hand);
-      }
-      saveState();
-      await message.channel.send('All players joined! Starting game.');
-      await startRound(gameId);
-    }
-  },
-
-  pick: async (message, args) => {
-    const gameId = message.channel.id;
-    if (!cahGames[gameId] || !cahCurrent[gameId]) {
-      return;
-    }
-    const game = cahGames[gameId];
-    const current = cahCurrent[gameId];
-    const czarId = game.players[game.czarIndex];
-    if (message.author.id !== czarId) {
-      return message.reply('Only the Card Czar can pick the winner!');
-    }
-    if (!current.showed) {
-      return message.reply('Submissions are not ready yet!');
-    }
-    const num = parseInt(args[0]);
-    if (isNaN(num) || !current.pickMap[num]) {
-      return message.reply('Invalid pick number!');
-    }
-    const anon = current.pickMap[num];
-    const winnerId = current.mapping[anon];
-    const winnerIndex = game.players.indexOf(winnerId);
-    game.scores[winnerIndex]++;
-    saveState();
-    const filled = current.black.text.replace(/_/g, (match, offset) => current.submissions[anon].shift() || match);
-    await message.channel.send(`Winner is <@${winnerId}> with: \`${filled}\`\nThey get 1 awesome point! Current score: ${game.scores[winnerIndex]}`);
-    if (game.scores[winnerIndex] >= 5) {
-      return endCahGame(gameId, `<@${winnerId}> reached 5 points!`);
-    }
-    for (const playerId of game.players) {
-      const hand = cahHands[gameId][playerId];
-      const needed = 10 - hand.length;
-      if (needed > 0) {
-        hand.push(...cahDecks[gameId].whites.splice(0, needed));
-      }
-      await sendHand(playerId, hand);
-    }
-    game.czarIndex = (game.czarIndex + 1) % 4;
-    saveState();
-    await startRound(gameId);
-  }
-};
 
 client.on('messageCreate', async (message) => {
   if (message.author.id === client.user.id) return;
@@ -1008,7 +507,7 @@ client.on('messageCreate', async (message) => {
       const anon = `anon${++current.anonCount}`;
       current.submissions[anon] = cards;
       current.mapping[anon] = message.author.id;
-      saveState();
+      await saveState();
       await message.react('✅');
       await message.reply('Submission received!');
       if (Object.keys(current.submissions).length === game.players.length - 1) {
@@ -1042,7 +541,7 @@ client.on('messageCreate', async (message) => {
             await message.react('❌');
             setTimeout(() => errorMsg.delete().catch(console.error), 5000);
           }
-          saveState();
+          await saveState();
           return;
         }
       } else if (games[gameId].gameType === 'battleship') {
@@ -1120,17 +619,17 @@ client.on('messageCreate', async (message) => {
             ownGrid[r][c] = 'S';
           }
           placedShips[gameId][playerKey].push(ship);
-          saveState();
+          await saveState();
           await message.react('✅');
           await message.reply(`Placed ${ship} at ${coord} ${dir.toUpperCase()}`);
           await updateBoards(gameId, playerKey);
           if (placedShips[gameId][playerKey].length === 5) {
             placementPhases[gameId][playerKey] = true;
-            saveState();
+            await saveState();
             await message.reply('All ships placed! Waiting for opponent.');
             if (placementPhases[gameId].p1 && placementPhases[gameId].p2) {
               currentTurns[gameId] = 'p1';
-              saveState();
+              await saveState();
               const channel = await client.channels.fetch(gameId);
               channel.send('Both players have placed their ships! Game starts. Player 1\'s turn.');
               await updateBoards(gameId, 'p1');
@@ -1165,7 +664,7 @@ client.on('messageCreate', async (message) => {
           const mark = isHit ? 'H' : 'M';
           oppOwnGrid[row][col] = mark;
           trackingGrid[row][col] = mark;
-          saveState();
+          await saveState();
           await message.react('✅');
           const channel = await client.channels.fetch(gameId);
           channel.send(`<@${message.author.id}> guessed ${coord}: ${isHit ? 'Hit!' : 'Miss!'}`);
@@ -1180,11 +679,11 @@ client.on('messageCreate', async (message) => {
             delete placedShips[gameId];
             delete placementPhases[gameId];
             delete boardMessages[gameId];
-            saveState();
+            await saveState();
             return;
           }
           currentTurns[gameId] = oppKey;
-          saveState();
+          await saveState();
           await updateBoards(gameId, 'p1');
           await updateBoards(gameId, 'p2');
           await message.reply(`${isHit ? 'Hit' : 'Miss'} on ${coord}`);
@@ -1198,14 +697,45 @@ client.on('messageCreate', async (message) => {
   const args = message.content.slice(1).trim().split(/ +/);
   const command = args.shift().toLowerCase();
   if (commands[command]) {
-    await commands[command](message, args);
+    await commands[command](message, args, {
+      client,
+      games,
+      words,
+      endTimes,
+      boards,
+      activeGames,
+      cahGames,
+      cahHands,
+      cahDecks,
+      cahCurrent,
+      cahActivePlayers,
+      customWhiteCards,
+      battleshipBoards,
+      currentTurns,
+      placedShips,
+      placementPhases,
+      boardMessages,
+      shipSizes,
+      saveState,
+      createBoardImage,
+      createBattleshipImage,
+      updateBoards,
+      endGame,
+      fetchCards,
+      sendHand,
+      startRound,
+      showSubmissions,
+      endCahGame
+    });
   }
 });
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
-  rotateStatus();
-  setInterval(rotateStatus, 300000);
+  loadState().then(() => {
+    rotateStatus();
+    setInterval(rotateStatus, 300000);
+  });
 });
 
 client.login(TOKEN);
