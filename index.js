@@ -1,6 +1,7 @@
 const { Client, MessageAttachment } = require('discord.js-selfbot-v13');
 const Canvas = require('canvas');
-const fs = require('fs').promises;
+const fs = require('fs'); // Import full fs module for synchronous methods
+const fsPromises = require('fs').promises; // Import fs.promises for async methods
 const path = require('path');
 require('dotenv').config();
 const https = require('https');
