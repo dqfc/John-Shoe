@@ -277,7 +277,7 @@ async function showSubmissions(gameId) {
     const cards = current.submissions[anon];
     let displayText;
     if (current.black.pick === 0 || !current.black.text.includes('_')) {
-      displayText = `${current.black.text} + ${cards.join(', ')}`;
+      displayText = `${current.black.text} ${cards.join(', ')}`;
     } else {
       let filled = current.black.text;
       cards.forEach(c => {
