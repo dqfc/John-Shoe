@@ -71,6 +71,7 @@ function saveState() {
 }
 
 loadState();
+
 async function isValidEnglishWord(word) {
   try {
     const response = await fetch(`https://api.datamuse.com/words?sp=${encodeURIComponent(word)}&md=d`);
@@ -177,10 +178,10 @@ async function endGame(gameId, client, channel) {
   resultCtx.fillStyle = '#000000';
   resultCtx.font = '20px sans-serif';
   resultCtx.textAlign = 'center';
-  resultCtx.fillText(`${p1User.tag}`, 125, 60); // Username
-  resultCtx.fillText(`${p1Count} words`, 125, 80); // Points on new line
-  resultCtx.fillText(`${p2User.tag}`, 475, 60); // Username
-  resultCtx.fillText(`${p2Count} words`, 475, 80); // Points on new line
+  resultCtx.fillText(`${p1User.tag}`, 125, 60);
+  resultCtx.fillText(`${p1Count} words`, 125, 80);
+  resultCtx.fillText(`${p2User.tag}`, 475, 60);
+  resultCtx.fillText(`${p2Count} words`, 475, 80);
   resultCtx.font = '30px sans-serif';
   resultCtx.fillText(winner, 300, 50);
   channel.send({ content: 'Boggle game over!', files: [{ attachment: resultCanvas.toBuffer(), name: 'boggle-result.png' }] });
@@ -220,7 +221,6 @@ async function fetchCards() {
       blacks.push(...p.black);
       whites.push(...p.white);
     });
-    // Shuffle decks
     blacks.sort(() => Math.random() - 0.5);
     whites.sort(() => Math.random() - 0.5);
     return { blacks, whites };
@@ -261,7 +261,6 @@ async function startRound(gameId) {
   }
 }
 
-
 async function showSubmissions(gameId) {
   const current = cahCurrent[gameId];
   if (current.showed) return;
@@ -269,17 +268,15 @@ async function showSubmissions(gameId) {
   const channel = await client.channels.fetch(game.channel);
   const czarId = game.players[game.czarIndex];
   let anons = Object.keys(current.submissions);
-  anons.sort(() => Math.random() - 0.5); // Shuffle for anonymity
+  anons.sort(() => Math.random() - 0.5);
   let list = '**Submissions:**\n';
   const pickMap = {};
   anons.forEach((anon, i) => {
     const cards = current.submissions[anon];
     let displayText;
     if (current.black.pick === 0 || !current.black.text.includes('_')) {
-      // Handle cards without blanks
       displayText = `${current.black.text} + ${cards.join(', ')}`;
     } else {
-      // Handle cards with blanks
       let filled = current.black.text;
       cards.forEach(c => {
         filled = filled.replace('_', c);
@@ -488,6 +485,7 @@ const commands = {
 - \`+cah\` - start Cards Against Humanity game (requires 4 players)
 - \`+joincah\` - join CAH game
 - \`+pick <num>\` - (CAH Czar only) pick winning submission
+*Note*: Custom white cards for CAH can be added externally using addWhite.js before the game starts.
     `;
     await message.channel.send(helpText);
   },
@@ -605,6 +603,59 @@ const commands = {
     console.log(`User ${message.author.tag} used +lesbians with mention ${mention}`);
   },
 
+  cah: async (message) => {
+    const gameId = message.channel.id;
+    if (cahGames[gameId]) {
+      return message.channel.send('A CAH game is already in progress in this channel!');
+    }
+    cahGames[gameId] = {
+      players: [message.author.id],
+      czarIndex: 0,
+      scores: [],
+      channel: gameId
+    };
+    cahActivePlayers[message.author.id] = gameId;
+    cahDecks[gameId] = { blacks: [], whites: [] }; // Initialize for custom cards
+    saveState();
+    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
+  },
+
+  joincah: async (message) => {
+    const gameId = message.channel.id;
+    if (!cahGames[gameId]) {
+      return message.channel.send('No CAH game is currently active in this channel!');
+    }
+    const game = cahGames[gameId];
+    if (game.players.length >= 4) {
+      return message.channel.send('The game is already full!');
+    }
+    if (game.players.includes(message.author.id)) {
+      return message.channel.send('You are already in the game!');
+    }
+    game.players.push(message.author.id);
+    cahActivePlayers[message.author.id] = gameId;
+    saveState();
+    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
+    if (game.players.length === 4) {
+      game.scores = new Array(4).fill(0);
+      const fetchedCards = await fetchCards();
+      cahDecks[gameId].blacks = fetchedCards.blacks;
+      // Merge custom white cards with fetched ones
+      cahDecks[gameId].whites = [...(cahDecks[gameId].whites || []), ...fetchedCards.whites];
+      cahDecks[gameId].whites.sort(() => Math.random() - 0.5); // Shuffle combined deck
+      cahHands[gameId] = {};
+      for (let i = 0; i < 4; i++) {
+        const playerId = game.players[i];
+        const hand = cahDecks[gameId].whites.splice(0, 10);
+        cahHands[gameId][playerId] = hand;
+        await sendHand(playerId, hand);
+      }
+      saveState();
+      await message.channel.send('All players joined! Starting game.');
+      await startRound(gameId);
+    }
+  },
+
   boggle: async (message) => {
     console.log(`User ${message.author.tag} used +boggle in channel ${message.channel.id}`);
     if (games[message.channel.id]) {
@@ -615,6 +666,7 @@ const commands = {
     saveState();
     await message.channel.send('Boggle game started! Use +join to join as the second player.');
   },
+
   join: async (message) => {
     console.log(`User ${message.author.tag} used +join in channel ${message.channel.id}`);
     if (!games[message.channel.id]) {
@@ -636,7 +688,6 @@ const commands = {
       "EGINTV", "EHINPS", "ELPSTU", "GILRUW"
     ];
 
-    // Generate board directly without checking for formable words
     dice.sort(() => Math.random() - 0.5);
     const board = [];
     for (let i = 0; i < 4; i++) {
@@ -668,54 +719,6 @@ const commands = {
     setTimeout(() => endGame(message.channel.id, client, message.channel), 120000);
   },
 
-  cah: async (message) => {
-    const gameId = message.channel.id;
-    if (cahGames[gameId]) {
-      return message.channel.send('A CAH game is already in progress in this channel!');
-    }
-    cahGames[gameId] = {
-      players: [message.author.id],
-      czarIndex: 0,
-      scores: [],
-      channel: gameId
-    };
-    cahActivePlayers[message.author.id] = gameId;
-    saveState();
-    await message.channel.send('CAH game started! Need 4 players. Use +joincah to join.');
-  },
-
-  joincah: async (message) => {
-    const gameId = message.channel.id;
-    if (!cahGames[gameId]) {
-      return message.channel.send('No CAH game is currently active in this channel!');
-    }
-    const game = cahGames[gameId];
-    if (game.players.length >= 4) {
-      return message.channel.send('The game is already full!');
-    }
-    if (game.players.includes(message.author.id)) {
-      return message.channel.send('You are already in the game!');
-    }
-    game.players.push(message.author.id);
-    cahActivePlayers[message.author.id] = gameId;
-    saveState();
-    await message.channel.send(`Player <@${message.author.id}> joined! (${game.players.length}/4)`);
-    if (game.players.length === 4) {
-      game.scores = new Array(4).fill(0);
-      cahDecks[gameId] = await fetchCards();
-      cahHands[gameId] = {};
-      for (let i = 0; i < 4; i++) {
-        const playerId = game.players[i];
-        const hand = cahDecks[gameId].whites.splice(0, 10);
-        cahHands[gameId][playerId] = hand;
-        await sendHand(playerId, hand);
-      }
-      saveState();
-      await message.channel.send('All players joined! Starting game.');
-      await startRound(gameId);
-    }
-  },
-
   pick: async (message, args) => {
     const gameId = message.channel.id;
     if (!cahGames[gameId] || !cahCurrent[gameId]) {
@@ -740,11 +743,10 @@ const commands = {
     game.scores[winnerIndex]++;
     saveState();
     const filled = current.black.text.replace(/_/g, (match, offset) => current.submissions[anon].shift() || match);
-    await message.channel.send(`Winner is <@${winnerId}> with: ${filled}\nThey get 1 awesome point! Current score: ${game.scores[winnerIndex]}`);
+    await message.channel.send(`Winner is <@${winnerId}> with: \`${filled}\`\nThey get 1 awesome point! Current score: ${game.scores[winnerIndex]}`);
     if (game.scores[winnerIndex] >= 5) {
       return endCahGame(gameId, `<@${winnerId}> reached 5 points!`);
     }
-    // Refill hands
     for (const playerId of game.players) {
       const hand = cahHands[gameId][playerId];
       const needed = 10 - hand.length;
@@ -753,7 +755,6 @@ const commands = {
       }
       await sendHand(playerId, hand);
     }
-    // Rotate Czar
     game.czarIndex = (game.czarIndex + 1) % 4;
     saveState();
     await startRound(gameId);
@@ -762,13 +763,11 @@ const commands = {
 
 // Unified message handler
 client.on('messageCreate', async (message) => {
-  if (message.author.id === client.user.id) return; // Ignore selfbot messages
+  if (message.author.id === client.user.id) return;
 
-  // Handle DMs for games
   if (message.channel.type === 'DM') {
-    // Boggle handling
     const boggleGameId = activeGames[message.author.id];
-    if (boggleGameId && games[boggleGameId] && Date.now() < endTimes[boggleGameId] && 
+    if (boggleGameId && games[boggleGameId] && Date.now() < endTimes[boggleGameId] &&
         (message.author.id === games[boggleGameId].player1 || message.author.id === games[boggleGameId].player2)) {
       const player = message.author.id === games[boggleGameId].player1 ? 'p1' : 'p2';
       const word = message.content.trim().toLowerCase();
@@ -789,7 +788,6 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // CAH handling
     const cahGameId = cahActivePlayers[message.author.id];
     if (cahGameId && cahCurrent[cahGameId]) {
       const game = cahGames[cahGameId];
@@ -810,7 +808,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('Invalid card numbers!');
       }
       const cards = nums.map(i => hand[i].text);
-      nums.sort((a, b) => b - a); // Remove from end to avoid index shift
+      nums.sort((a, b) => b - a);
       nums.forEach(i => hand.splice(i, 1));
       const anon = `anon${++current.anonCount}`;
       current.submissions[anon] = cards;
@@ -824,7 +822,6 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // Handle commands in channels
   if (!message.content.startsWith('+')) return;
   const args = message.content.slice(1).trim().split(/ +/);
   const command = args.shift().toLowerCase();
@@ -833,10 +830,6 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-
-
-
-// Client ready
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
   rotateStatus();
