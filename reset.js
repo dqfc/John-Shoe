@@ -14,7 +14,8 @@ async function resetJsonFiles() {
     'cahActivePlayers.json',
     'battleshipBoards.json',
     'placedShips.json',
-    'placementPhases.json'
+    'placementPhases.json',
+    'boardMessages.json'
   ];
 
   try {
