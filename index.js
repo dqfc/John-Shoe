@@ -14,16 +14,9 @@ const FORCE_CUSTOM_CARDS_ONLY = true;
 const TOKEN = process.env.TOKEN;
 
 const statuses = [
-  { name: 'tort baller', type: 'PLAYING' },
-  { name: 'Something New', type: 'LISTENING' },
-  { name: '<- BORP', type: 'PLAYING' },
-  { name: 'Hyooo', type: 'PLAYING' },
-  { name: 'Routing', type: 'PLAYING' },
-  { name: 'ivy route', type: 'WATCHING' },
-  { name: '+help', type: 'WATCHING' },
-  { name: 'how o computtr,. Faggot level 555', type: 'PLAYING' },
-  { name: '+cah is new', type: 'PLAYING' },
-  { name: 'tort baller: the movie', type: 'WATCHING' }
+  { name: 'add something here', type: 'PLAYING' },
+  { name: 'add something else here', type: 'LISTENING' },
+  { name: 'and now for something completely different', type: 'WATCHING' }
 ];
 
 let games = {}, words = {}, endTimes = {}, boards = {}, activeGames = {};
