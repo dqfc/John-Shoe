@@ -22,10 +22,8 @@ try {
   process.exit(1);
 }
 
-// Add custom white card
 customWhiteCards.push({ text: cardText });
 
-// Save updated customWhiteCards.json
 try {
   fs.writeFileSync('./json/customWhiteCards.json', JSON.stringify(customWhiteCards));
   console.log(`Successfully added permanent white card: "${cardText}"`);

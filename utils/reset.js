@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+const path = require('path');
 
 async function resetJsonFiles() {
   const files = [
@@ -20,8 +21,9 @@ async function resetJsonFiles() {
 
   try {
     for (const file of files) {
-      await fs.writeFile(file, '{}', 'utf8');
-      console.log(`Successfully reset ${file} to {}`);
+      const filePath = path.join(__dirname, '..', 'json', file);
+      await fs.writeFile(filePath, '{}', 'utf8');
+      console.log(`Successfully reset ${filePath} to {}`);
     }
   } catch (error) {
     console.error('Error resetting JSON files:', error);
