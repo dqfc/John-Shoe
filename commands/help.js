@@ -2,14 +2,14 @@ module.exports = async (message, args, context) => {
   const helpText = `
 **Available Commands:**
 - \`+hello\` - hello world
-- \`+ping\` - pingle
+- \`+ping\` - pong
 - \`+help\` - shows this help message
 - \`+fox\` - get picture of fox
 - \`+cat\` - get picture of cat
 - \`+dog\` - get picture of dog
 - \`+gif\` - send random gif
-- \`+gay <@user>\` - find how much gay someone is
-- \`+lesbians <@user>\` - find how much lesbians someone is
+- \`+gay <@user>\` - find how much of a gay someone is
+- \`+lesbian <@user>\` - find how much of a lesbian someone is
 - \`+burn <text>\` - burning text
 - \`+quote\` - quote a message (reply to someone)
 - \`+boggle\` - play boggle
