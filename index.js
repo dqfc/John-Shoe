@@ -464,8 +464,9 @@ client.on('messageCreate', async (message) => {
   if (message.author.id === client.user.id) return;
 
   if (message.channel.type === 'DM') {
-    const cahGameId = cahActivePlayers[message.author.id];
-    if (cahGameId && cahCurrent[cahGameId]) {
+     const cahGameId = cahActivePlayers[message.author.id];
+    // Only process CAH DMs if the user is NOT currently in a boggle DM session.
+    if (cahGameId && cahCurrent[cahGameId] && !isInBoggle) {
       const game = cahGames[cahGameId];
       const current = cahCurrent[cahGameId];
       const czarId = game.players[game.czarIndex];
